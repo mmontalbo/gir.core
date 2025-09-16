@@ -8,7 +8,7 @@ compatible engine once the repository is built locally.
 
 To follow the steps below you will need:
 
-- The [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0) available on
+- The [.NET 9 SDK](https://dotnet.microsoft.com/download/dotnet/9.0) available on
   your `PATH` so the `dotnet` CLI is accessible.
 - The SharpFuzz command-line tool version `2.2.0` installed globally:
 
@@ -44,11 +44,11 @@ instrumented using the helper script:
 ```
 
 The script verifies that both the `dotnet` CLI and the SharpFuzz tool are
-available, builds the `SourceFuncFuzzer` target in `Release` mode, and copies
-the published output to
-`src/Tests/Fuzzing/SourceFuncFuzzer/bin/Release/net8.0/publish/instrumented`.
-`sharpfuzz` is then invoked against `SourceFuncFuzzer.dll` so the instrumented
-assembly is ready for use with AFL or libFuzzer drivers.
+available, ensures the generated bindings are present, builds the
+`SourceFuncFuzzer` target in `Release` mode, and copies the published output to
+`src/Tests/Fuzzing/SourceFuncFuzzer/bin/Release/instrumented`. `sharpfuzz` is
+then invoked against `SourceFuncFuzzer.dll` so the instrumented assembly is
+ready for use with AFL or libFuzzer drivers.
 
 The script may be executed from outside of the repository by pointing
 `GIR_CORE_ROOT` at your checkout:

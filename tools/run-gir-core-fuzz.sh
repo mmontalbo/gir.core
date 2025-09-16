@@ -6,8 +6,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${GIR_CORE_ROOT:-$(cd "${SCRIPT_DIR}/.." && pwd)}"
 PROJECT_PATH="${REPO_ROOT}/src/Tests/Fuzzing/SourceFuncFuzzer/SourceFuncFuzzer.csproj"
 PROPS_FILE="${REPO_ROOT}/properties/GirCore.Fuzzing.props"
-PUBLISH_DIR="${REPO_ROOT}/src/Tests/Fuzzing/SourceFuncFuzzer/bin/Release/net8.0/publish"
-INSTRUMENTED_DIR="${PUBLISH_DIR}/instrumented"
+GENERATED_IMPORT_RESOLVER="${REPO_ROOT}/src/Libs/GObject-2.0/Internal/ImportResolver.Generated.cs"
+PUBLISH_ROOT="${REPO_ROOT}/src/Tests/Fuzzing/SourceFuncFuzzer/bin/Release"
+PUBLISH_DIR="${PUBLISH_ROOT}/publish"
+INSTRUMENTED_DIR="${PUBLISH_ROOT}/instrumented"
 ASSEMBLY_NAME="SourceFuncFuzzer.dll"
 ASSEMBLY_PATH="${INSTRUMENTED_DIR}/${ASSEMBLY_NAME}"
 
@@ -21,6 +23,12 @@ if [[ ! -f "${PROPS_FILE}" ]]; then
   exit 1
 fi
 
+if [[ ! -f "${GENERATED_IMPORT_RESOLVER}" ]]; then
+  echo "Generated bindings are required but ${GENERATED_IMPORT_RESOLVER} was not found." >&2
+  echo "Run 'dotnet fsi scripts/GenerateLibs.fsx' before instrumenting the harness." >&2
+  exit 1
+fi
+
 SHARPFUZZ_VERSION=$(sed -n 's/.*<SharpFuzzVersion>\(.*\)<\/SharpFuzzVersion>.*/\1/p' "${PROPS_FILE}" | head -n 1)
 
 if [[ -z "${SHARPFUZZ_VERSION}" ]]; then
@@ -29,7 +37,7 @@ if [[ -z "${SHARPFUZZ_VERSION}" ]]; then
 fi
 
 if ! command -v dotnet >/dev/null 2>&1; then
-  echo "The dotnet CLI is required. Install the .NET 8 SDK and ensure 'dotnet' is on your PATH." >&2
+  echo "The dotnet CLI is required. Install the .NET SDK (9.0 or later) and ensure 'dotnet' is on your PATH." >&2
   exit 1
 fi
 
@@ -39,7 +47,7 @@ if ! command -v sharpfuzz >/dev/null 2>&1; then
 fi
 
 echo "Building SourceFuncFuzzer harness..."
-dotnet publish "${PROJECT_PATH}" -c Release >/dev/null
+dotnet publish "${PROJECT_PATH}" -c Release -o "${PUBLISH_DIR}"
 
 echo "Preparing instrumented output directory..."
 rm -rf "${INSTRUMENTED_DIR}"
@@ -52,7 +60,7 @@ if [[ ! -f "${ASSEMBLY_PATH}" ]]; then
 fi
 
 echo "Instrumenting ${ASSEMBLY_NAME} with SharpFuzz..."
-if ! sharpfuzz "${ASSEMBLY_PATH}" GirCore.Fuzzing.SourceFuncFuzzer >/dev/null; then
+if ! sharpfuzz "${ASSEMBLY_PATH}" GirCore.Fuzzing.SourceFuncFuzzer; then
   echo "SharpFuzz instrumentation failed." >&2
   exit 1
 fi

@@ -1,7 +1,7 @@
 { pkgs ? import <nixpkgs> {} }:
 
 let
-  dotnetSdk = pkgs.dotnet-sdk_8;
+  dotnetSdk = pkgs.dotnet-sdk_9;
 in
 pkgs.mkShell {
   packages = [
