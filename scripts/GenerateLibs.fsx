@@ -1,5 +1,21 @@
 #r "nuget: SimpleExec, 8.0.0"
 open SimpleExec
+open System.IO
+
+let repoRoot =
+    Path.GetFullPath(Path.Combine(__SOURCE_DIRECTORY__, ".."))
+
+let girFilesDirectory =
+    Path.Combine(repoRoot, "ext", "gir-files")
+
+if not (Directory.Exists(girFilesDirectory)) then
+    failwithf "Unable to locate the GIR files directory at '%s'." girFilesDirectory
+
+let girToolProject =
+    Path.Combine(repoRoot, "src", "Generation", "GirTool", "GirTool.csproj")
+
+let libsOutputDirectory =
+    Path.Combine(repoRoot, "src", "Libs")
 
 (*
   Include any command line args as extra files to generate.
@@ -44,8 +60,9 @@ let mutable exitCode = 0
 
 Command.Run(
     name = "dotnet",
-    args = $"run --project ../../src/Generation/GirTool/GirTool.csproj -- generate {girFiles} --output ../../src/Libs --search-path-linux linux --search-path-macos macos --search-path-windows windows --log-level Debug",
-    workingDirectory = "../ext/gir-files",
+    args =
+        $"run --project \"{girToolProject}\" -- generate {girFiles} --output \"{libsOutputDirectory}\" --search-path-linux linux --search-path-macos macos --search-path-windows windows --log-level Debug",
+    workingDirectory = girFilesDirectory,
     handleExitCode = fun result ->
         exitCode <- result
         true)
