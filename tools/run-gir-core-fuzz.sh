@@ -195,6 +195,11 @@ run_afl() {
   : "${AFL_SKIP_CPUFREQ:=1}"
   export AFL_SKIP_CPUFREQ
 
+  if [[ -z "${AFL_SKIP_BIN_CHECK:-}" ]]; then
+    export AFL_SKIP_BIN_CHECK=1
+    echo "Setting AFL_SKIP_BIN_CHECK=1 so AFL++ accepts the managed harness." >&2
+  fi
+
   maybe_warn_core_pattern
 
   if [[ ${SKIP_INSTRUMENT} -eq 0 ]]; then
