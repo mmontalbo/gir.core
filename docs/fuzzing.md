@@ -84,7 +84,9 @@ If instrumentation is required, the script rebuilds the harness before launching
 `afl-fuzz`. A seed corpus containing a small default input is created in
 `src/Tests/Fuzzing/SourceFuncFuzzer/corpus`, and findings are written to a
 timestamped directory under `src/Tests/Fuzzing/SourceFuncFuzzer/findings`. The
-placeholder seed ensures AFL++ always has a non-empty test case to mutate.
+placeholder seed ensures AFL++ always has a non-empty test case to mutate; when
+the stream is empty the harness returns immediately, and AFL++ trims the queue
+back to an empty seed otherwise.
 
 By default the helper starts a "serious" campaign that uses the available CPU
 cores (capped at 32) by running a foreground master instance and multiple
@@ -101,8 +103,15 @@ not already present:
 - `AFL_IMPORT_FIRST=1` to prioritise importing synced queue entries from other
   fuzzers.
 - `AFL_IGNORE_SEED_PROBLEMS=1` to skip crashing or hanging seeds during warmup.
+- `AFL_MIN_LEN=1` so AFL++ keeps at least one byte in every testcase; the
+  `SourceFunc` harness exits immediately on empty inputs, and zero-length seeds
+  collapse coverage.
 - `AFL_TESTCACHE_SIZE=200` (megabytes) to cache test cases in RAM; override the
   value with `--testcache <mb>` or by exporting `AFL_TESTCACHE_SIZE` manually.
+
+Override any of these by exporting the environment variable before launching
+the helper. For example, set `AFL_MIN_LEN=0` explicitly if you need to fuzz the
+empty-input path.
 
 `/proc/sys/kernel/core_pattern` is inspected before fuzzing. If the kernel is
 configured to pipe core dumps to another process, the helper exports
@@ -137,7 +146,7 @@ instrument`), execute the following commands from the repository root:
 ```bash
 mkdir -p src/Tests/Fuzzing/SourceFuncFuzzer/corpus
 printf 'seed' > src/Tests/Fuzzing/SourceFuncFuzzer/corpus/seed-default
-AFL_SKIP_BIN_CHECK=1 afl-fuzz -i src/Tests/Fuzzing/SourceFuncFuzzer/corpus \
+AFL_SKIP_BIN_CHECK=1 AFL_MIN_LEN=1 afl-fuzz -i src/Tests/Fuzzing/SourceFuncFuzzer/corpus \
   -o src/Tests/Fuzzing/SourceFuncFuzzer/findings \
   -- "$(command -v dotnet)" \
   src/Tests/Fuzzing/SourceFuncFuzzer/bin/Release/instrumented/SourceFuncFuzzer.dll \
@@ -145,7 +154,8 @@ AFL_SKIP_BIN_CHECK=1 afl-fuzz -i src/Tests/Fuzzing/SourceFuncFuzzer/corpus \
 ```
 
 Ensure the corpus directory always contains at least one non-empty seed; AFL++
-aborts when the input directory only has empty files.
+aborts when the input directory only has empty files. Setting `AFL_MIN_LEN=1`
+prevents the queue from being trimmed back to the zero-byte case.
 
 Using the fully qualified `dotnet` path suppresses AFL++'s warning about an
 unqualified binary name. If `/proc/sys/kernel/core_pattern` pipes crash dumps to

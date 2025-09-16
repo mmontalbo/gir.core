@@ -260,6 +260,11 @@ run_afl() {
     echo "Setting AFL_IGNORE_SEED_PROBLEMS=1 to skip crashing seeds during warmup." >&2
   fi
 
+  if [[ -z "${AFL_MIN_LEN:-}" ]]; then
+    export AFL_MIN_LEN=1
+    echo "Setting AFL_MIN_LEN=1 so SourceFunc inputs remain non-empty." >&2
+  fi
+
   if [[ -z "${AFL_TESTCACHE_SIZE:-}" ]]; then
     local cache_target=""
 
