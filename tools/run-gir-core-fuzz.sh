@@ -217,8 +217,11 @@ run_afl() {
     local findings_dir="${DEFAULT_FINDINGS_DIR_BASE}/run-$(date +%Y%m%d-%H%M%S)"
 
     mkdir -p "${corpus_dir}"
-    if [[ ! -e "${corpus_dir}/empty" ]]; then
-      : >"${corpus_dir}/empty"
+
+    local default_seed="${corpus_dir}/seed-default"
+
+    if [[ ! -s "${default_seed}" ]]; then
+      printf '%s' $'\x00seed' >"${default_seed}"
     fi
 
     mkdir -p "${findings_dir}"
