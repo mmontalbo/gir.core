@@ -2,13 +2,20 @@
 
 let
   dotnetSdk = pkgs.dotnet-sdk_9;
+  dotnetRuntime8 = pkgs.dotnet-runtime_8;
+  dotnetRoot = pkgs.buildEnv {
+    name = "dotnet-root";
+    paths = [ dotnetSdk dotnetRuntime8 ];
+    pathsToLink = [ "/share/dotnet" ];
+  };
 in
 pkgs.mkShell {
   packages = [
     dotnetSdk
+    dotnetRuntime8
   ];
 
-  DOTNET_ROOT = "${dotnetSdk}/share/dotnet";
+  DOTNET_ROOT = "${dotnetRoot}/share/dotnet";
   SSL_CERT_FILE = "${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt";
 
   shellHook = ''

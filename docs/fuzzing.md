@@ -10,6 +10,10 @@ To follow the steps below you will need:
 
 - The [.NET 9 SDK](https://dotnet.microsoft.com/download/dotnet/9.0) available on
   your `PATH` so the `dotnet` CLI is accessible.
+- The [.NET 8 runtime](https://dotnet.microsoft.com/download/dotnet/8.0)
+  (`Microsoft.NETCore.App`) installed alongside the SDK. The SharpFuzz command-
+  line tool currently targets .NET 8 even when the harness is built with the
+  .NET 9 SDK.
 - The SharpFuzz command-line tool version `2.2.0` installed globally:
 
   ```bash
@@ -27,8 +31,8 @@ To follow the steps below you will need:
   ```
 
 If you are using [Nix](https://nixos.org), a development shell is provided that
-installs the required SDK and configures the SharpFuzz CLI locally. Enter it by
-running:
+installs the .NET 9 SDK, the .NET 8 runtime, and configures the SharpFuzz CLI
+locally. Enter it by running:
 
 ```bash
 nix-shell

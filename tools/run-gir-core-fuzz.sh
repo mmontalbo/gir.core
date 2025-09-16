@@ -41,6 +41,12 @@ if ! command -v dotnet >/dev/null 2>&1; then
   exit 1
 fi
 
+if ! dotnet --list-runtimes 2>/dev/null | grep -q 'Microsoft.NETCore.App 8\.'; then
+  echo "SharpFuzz.CommandLine currently targets the .NET 8 runtime." >&2
+  echo "Install the Microsoft.NETCore.App 8 runtime alongside your SDK and try again." >&2
+  exit 1
+fi
+
 if ! command -v sharpfuzz >/dev/null 2>&1; then
   echo "SharpFuzz.CommandLine is required. Install it with 'dotnet tool install --global SharpFuzz.CommandLine --version ${SHARPFUZZ_VERSION}'." >&2
   exit 1
