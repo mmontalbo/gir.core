@@ -21,26 +21,48 @@ usage() {
 Usage: $(basename "$0") [instrument|afl] [options] [-- [afl-fuzz options]]
 
 Commands:
-  instrument         Build and instrument the SourceFunc harness (default).
-  afl                Instrument the harness (unless --skip-instrument) and launch AFL++.
+  instrument           Build and instrument the SourceFunc harness (default).
+  afl                  Instrument the harness (unless --skip-instrument) and launch AFL++.
 
 Options:
-  --skip-instrument  Skip rebuilding the harness when running the 'afl' command.
-  -h, --help         Show this help text and exit.
+  --skip-instrument    Skip rebuilding the harness when running the 'afl' command.
+  --single             Launch a single AFL++ instance instead of a multi-core campaign.
+  --workers <count>    Override the number of AFL++ instances (defaults to detected cores, capped at 32).
+  --testcache <mb>     Set AFL_TESTCACHE_SIZE when launching AFL++ (default: 200 MB).
+  -h, --help           Show this help text and exit.
 
 When running 'afl' without extra options, a seed corpus is created in
 ${DEFAULT_CORPUS_DIR} and AFL++ writes findings to a timestamped folder under
-${DEFAULT_FINDINGS_DIR_BASE}.
+${DEFAULT_FINDINGS_DIR_BASE}. The helper launches a primary master instance and
+secondary workers with varied schedules so the harness is fuzzed across multiple
+CPU cores. Pass --single to revert to the legacy one-worker behaviour, or append
+custom AFL++ parameters after "--" to take full control of the invocation.
 
-To provide custom AFL++ options (for example, to reuse an existing corpus),
-append them after "--". The harness command "dotnet ${ASSEMBLY_NAME} @@" is
-appended automatically.
+The harness command "dotnet ${ASSEMBLY_NAME} @@" is appended automatically.
 EOF
 }
 
 COMMAND="instrument"
 SKIP_INSTRUMENT=0
+SERIOUS_MODE=1
+FORCE_SINGLE=0
+REQUESTED_WORKERS=""
+REQUESTED_TESTCACHE=""
+WORKER_COUNT_VALUE=""
+TESTCACHE_VALUE=""
 declare -a AFL_ARGS=()
+declare -a AFL_SECONDARY_PIDS=()
+
+cleanup_secondaries() {
+  if [[ ${#AFL_SECONDARY_PIDS[@]} -eq 0 ]]; then
+    return
+  fi
+
+  echo "Stopping secondary AFL++ instances..." >&2
+  kill "${AFL_SECONDARY_PIDS[@]}" 2>/dev/null || true
+  wait "${AFL_SECONDARY_PIDS[@]}" 2>/dev/null || true
+  AFL_SECONDARY_PIDS=()
+}
 
 if [[ ! -f "${PROJECT_PATH}" ]]; then
   echo "Unable to locate the SourceFuncFuzzer project at ${PROJECT_PATH}." >&2
@@ -81,6 +103,34 @@ parse_args() {
       --skip-instrument)
         SKIP_INSTRUMENT=1
         shift
+        ;;
+      --single)
+        FORCE_SINGLE=1
+        SERIOUS_MODE=0
+        shift
+        ;;
+      --serious)
+        SERIOUS_MODE=1
+        FORCE_SINGLE=0
+        shift
+        ;;
+      --workers)
+        if [[ $# -lt 2 ]]; then
+          echo "--workers requires a count" >&2
+          usage >&2
+          exit 1
+        fi
+        REQUESTED_WORKERS="$2"
+        shift 2
+        ;;
+      --testcache)
+        if [[ $# -lt 2 ]]; then
+          echo "--testcache requires a size in megabytes" >&2
+          usage >&2
+          exit 1
+        fi
+        REQUESTED_TESTCACHE="$2"
+        shift 2
         ;;
       -h|--help)
         usage
@@ -200,6 +250,31 @@ run_afl() {
     echo "Setting AFL_SKIP_BIN_CHECK=1 so AFL++ accepts the managed harness." >&2
   fi
 
+  if [[ -z "${AFL_IMPORT_FIRST:-}" ]]; then
+    export AFL_IMPORT_FIRST=1
+    echo "Setting AFL_IMPORT_FIRST=1 so synchronized queues are imported first." >&2
+  fi
+
+  if [[ -z "${AFL_IGNORE_SEED_PROBLEMS:-}" ]]; then
+    export AFL_IGNORE_SEED_PROBLEMS=1
+    echo "Setting AFL_IGNORE_SEED_PROBLEMS=1 to skip crashing seeds during warmup." >&2
+  fi
+
+  if [[ -z "${AFL_TESTCACHE_SIZE:-}" ]]; then
+    local cache_target=""
+
+    if [[ -n "${TESTCACHE_VALUE}" ]]; then
+      cache_target="${TESTCACHE_VALUE}"
+    else
+      cache_target=200
+    fi
+
+    if [[ -n "${cache_target}" && ${cache_target} -gt 0 ]]; then
+      export AFL_TESTCACHE_SIZE="${cache_target}"
+      echo "Setting AFL_TESTCACHE_SIZE=${cache_target} to cache test cases in memory." >&2
+    fi
+  fi
+
   maybe_warn_core_pattern
 
   if [[ ${SKIP_INSTRUMENT} -eq 0 ]]; then
@@ -210,32 +285,162 @@ run_afl() {
     exit 1
   fi
 
-  local -a afl_cmd
+  local corpus_dir="${DEFAULT_CORPUS_DIR}"
+  local findings_dir="${DEFAULT_FINDINGS_DIR_BASE}/run-$(date +%Y%m%d-%H%M%S)"
+  local default_seed="${corpus_dir}/seed-default"
 
-  if [[ ${#AFL_ARGS[@]} -eq 0 ]]; then
-    local corpus_dir="${DEFAULT_CORPUS_DIR}"
-    local findings_dir="${DEFAULT_FINDINGS_DIR_BASE}/run-$(date +%Y%m%d-%H%M%S)"
+  mkdir -p "${corpus_dir}" "${findings_dir}"
 
-    mkdir -p "${corpus_dir}"
-
-    local default_seed="${corpus_dir}/seed-default"
-
-    if [[ ! -s "${default_seed}" ]]; then
-      printf 'seed' >"${default_seed}"
-    fi
-
-    mkdir -p "${findings_dir}"
-
-    echo "Launching AFL++ with seed corpus at ${corpus_dir}."
-    echo "Findings will be written to ${findings_dir}."
-
-    afl_cmd=("afl-fuzz" "-i" "${corpus_dir}" "-o" "${findings_dir}" "--" "${dotnet_path}" "${ASSEMBLY_PATH}" "@@")
-  else
-    echo "Launching AFL++ with custom arguments: ${AFL_ARGS[*]}"
-    afl_cmd=("afl-fuzz" "${AFL_ARGS[@]}" "--" "${dotnet_path}" "${ASSEMBLY_PATH}" "@@")
+  if [[ ! -s "${default_seed}" ]]; then
+    printf 'seed' >"${default_seed}"
   fi
 
-  exec "${afl_cmd[@]}"
+  local -a harness_tail=( "--" "${dotnet_path}" "${ASSEMBLY_PATH}" "@@" )
+
+  if [[ ${#AFL_ARGS[@]} -gt 0 ]]; then
+    echo "Launching AFL++ with custom arguments: ${AFL_ARGS[*]}"
+    local -a afl_cmd=( "afl-fuzz" "${AFL_ARGS[@]}" "${harness_tail[@]}" )
+    exec "${afl_cmd[@]}"
+  fi
+
+  local cpu_count_raw=""
+
+  if command -v getconf >/dev/null 2>&1; then
+    cpu_count_raw="$(getconf _NPROCESSORS_ONLN 2>/dev/null || true)"
+  fi
+
+  if [[ -z "${cpu_count_raw}" ]] && command -v nproc >/dev/null 2>&1; then
+    cpu_count_raw="$(nproc 2>/dev/null || true)"
+  fi
+
+  local cpu_count=1
+
+  if [[ "${cpu_count_raw}" =~ ^[0-9]+$ ]]; then
+    cpu_count=$((10#${cpu_count_raw}))
+  fi
+
+  if (( cpu_count < 1 )); then
+    cpu_count=1
+  fi
+
+  local worker_count=1
+
+  if [[ -n "${WORKER_COUNT_VALUE}" ]]; then
+    worker_count=${WORKER_COUNT_VALUE}
+  elif (( FORCE_SINGLE )); then
+    worker_count=1
+  elif (( SERIOUS_MODE )); then
+    worker_count=${cpu_count}
+
+    if (( worker_count > 32 )); then
+      worker_count=32
+    fi
+  fi
+
+  if (( worker_count < 1 )); then
+    worker_count=1
+  fi
+
+  local -a base_cmd=( "afl-fuzz" "-i" "${corpus_dir}" "-o" "${findings_dir}" )
+
+  if (( worker_count == 1 )); then
+    echo "Launching AFL++ with seed corpus at ${corpus_dir}."
+    echo "Findings will be written to ${findings_dir}."
+    local -a afl_cmd=( "${base_cmd[@]}" "${harness_tail[@]}" )
+    exec "${afl_cmd[@]}"
+  fi
+
+  local secondary_count=$((worker_count - 1))
+  local host_tag
+
+  host_tag="$(hostname -s 2>/dev/null || hostname 2>/dev/null || echo host)"
+  host_tag="${host_tag//[^A-Za-z0-9_-]/}" 
+
+  if [[ -z "${host_tag}" ]]; then
+    host_tag="host"
+  fi
+
+  local main_name="main-${host_tag}"
+  local logs_dir="${findings_dir}/logs"
+  mkdir -p "${logs_dir}"
+
+  echo "Launching AFL++ campaign with ${worker_count} workers (1 master, ${secondary_count} secondary)."
+  echo "Seed corpus: ${corpus_dir}"
+  echo "Findings directory: ${findings_dir}"
+
+  local -a secondary_variants=(
+    "mopt|-L 0 -p fast|"
+    "trim-explore|-p explore|AFL_DISABLE_TRIM=1"
+    "trim-exploit|-p exploit|AFL_DISABLE_TRIM=1"
+    "trim-rare|-p rare|AFL_DISABLE_TRIM=1"
+    "trim-lin|-p lin|AFL_DISABLE_TRIM=1"
+    "oldqueue|-Z -p coe|AFL_DISABLE_TRIM=1"
+    "ascii|-a ascii -p explore|"
+    "binary|-a binary -p exploit|"
+    "fast|-p fast|AFL_DISABLE_TRIM=1"
+    "quad|-p quad|"
+  )
+
+  AFL_SECONDARY_PIDS=()
+
+  local variant_count=${#secondary_variants[@]}
+
+  for ((i = 0; i < secondary_count; i++)); do
+    local variant="${secondary_variants[i % variant_count]}"
+    local variant_name=""
+    local variant_opts=""
+    local variant_env=""
+
+    IFS='|' read -r variant_name variant_opts variant_env <<<"${variant}"
+
+    if [[ -z "${variant_name}" ]]; then
+      variant_name="sec"
+    fi
+
+    local fuzzer_name
+    fuzzer_name="${variant_name}-$((i + 1))-${host_tag}"
+    fuzzer_name="${fuzzer_name//[^A-Za-z0-9_-]/-}"
+
+    local -a cmd=( "${base_cmd[@]}" "-S" "${fuzzer_name}" )
+
+    if [[ -n "${variant_opts}" ]]; then
+      read -r -a variant_opts_array <<<"${variant_opts}"
+      cmd+=( "${variant_opts_array[@]}" )
+    fi
+
+    local -a env_prefix=( "env" )
+
+    if [[ -n "${variant_env}" ]]; then
+      IFS=',' read -r -a variant_env_array <<<"${variant_env}"
+      for env_entry in "${variant_env_array[@]}"; do
+        if [[ -n "${env_entry}" ]]; then
+          env_prefix+=( "${env_entry}" )
+        fi
+      done
+    fi
+
+    cmd+=( "${harness_tail[@]}" )
+
+    local log_file="${logs_dir}/${fuzzer_name}.log"
+    echo "  Secondary ${fuzzer_name}: ${variant_opts:-default schedule}${variant_env:+ (env: ${variant_env})} -> ${log_file}"
+    env_prefix+=( "${cmd[@]}" )
+    "${env_prefix[@]}" >>"${log_file}" 2>&1 &
+    AFL_SECONDARY_PIDS+=($!)
+  done
+
+  trap cleanup_secondaries EXIT
+
+  echo "Master ${main_name} running in the foreground. Press Ctrl+C to stop the campaign."
+
+  local -a main_cmd=( "${base_cmd[@]}" "-M" "${main_name}" "-p" "explore" "${harness_tail[@]}" )
+
+  env AFL_FINAL_SYNC=1 "${main_cmd[@]}"
+  local main_status=$?
+
+  trap - EXIT
+  cleanup_secondaries
+
+  return ${main_status}
 }
 
 main() {
@@ -251,6 +456,56 @@ main() {
     echo "Additional arguments are only supported with the 'afl' command." >&2
     usage >&2
     exit 1
+  fi
+
+  if [[ "${COMMAND}" != "afl" ]]; then
+    if (( FORCE_SINGLE )); then
+      echo "--single is only available with the 'afl' command." >&2
+      usage >&2
+      exit 1
+    fi
+
+    if [[ -n "${REQUESTED_WORKERS}" ]]; then
+      echo "--workers is only available with the 'afl' command." >&2
+      usage >&2
+      exit 1
+    fi
+
+    if [[ -n "${REQUESTED_TESTCACHE}" ]]; then
+      echo "--testcache is only available with the 'afl' command." >&2
+      usage >&2
+      exit 1
+    fi
+  fi
+
+  if [[ -n "${REQUESTED_WORKERS}" ]]; then
+    if [[ ! "${REQUESTED_WORKERS}" =~ ^[0-9]+$ ]]; then
+      echo "--workers requires a positive integer." >&2
+      exit 1
+    fi
+
+    WORKER_COUNT_VALUE=$((10#${REQUESTED_WORKERS}))
+
+    if (( WORKER_COUNT_VALUE < 1 )); then
+      echo "--workers must be at least 1." >&2
+      exit 1
+    fi
+  fi
+
+  if [[ -n "${REQUESTED_TESTCACHE}" ]]; then
+    if [[ ! "${REQUESTED_TESTCACHE}" =~ ^[0-9]+$ ]]; then
+      echo "--testcache requires a non-negative integer." >&2
+      exit 1
+    fi
+
+    TESTCACHE_VALUE=$((10#${REQUESTED_TESTCACHE}))
+  fi
+
+  if (( FORCE_SINGLE )); then
+    if [[ -n "${WORKER_COUNT_VALUE}" ]] && (( WORKER_COUNT_VALUE > 1 )); then
+      echo "--single cannot be combined with --workers values greater than 1." >&2
+      exit 1
+    fi
   fi
 
   case "${COMMAND}" in

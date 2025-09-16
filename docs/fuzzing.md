@@ -83,25 +83,41 @@ To instrument the harness and immediately start fuzzing with AFL++, run:
 If instrumentation is required, the script rebuilds the harness before launching
 `afl-fuzz`. A seed corpus containing a small default input is created in
 `src/Tests/Fuzzing/SourceFuncFuzzer/corpus`, and findings are written to a
-timestamped directory under `src/Tests/Fuzzing/SourceFuncFuzzer/findings`.
-The placeholder seed ensures AFL++ always has a non-empty test case to mutate.
+timestamped directory under `src/Tests/Fuzzing/SourceFuncFuzzer/findings`. The
+placeholder seed ensures AFL++ always has a non-empty test case to mutate.
 
-The helper sets `AFL_SKIP_CPUFREQ=1` automatically and inspects
-`/proc/sys/kernel/core_pattern`. If the kernel is configured to pipe core dumps
-to another process, the script exports
-`AFL_I_DONT_CARE_ABOUT_MISSING_CRASHES=1` so AFL++ continues to run. Because the
-managed harness runs via the `dotnet` host, AFL++ cannot detect SharpFuzz's IL
-instrumentation in the native binary and would abort without an override; the
-helper therefore sets `AFL_SKIP_BIN_CHECK=1` for you. Adjust the core pattern to
-`core` before fuzzing if you would rather collect crash dumps immediately:
+By default the helper starts a "serious" campaign that uses the available CPU
+cores (capped at 32) by running a foreground master instance and multiple
+secondary fuzzers with varied schedules and mutation modes. Secondary workers
+write their console output to `findings/logs/<name>.log` while the master keeps
+the interactive TUI in the invoking terminal. Use `--workers <count>` to set an
+explicit total, or `--single` to fall back to the legacy one-instance launch.
+
+The script also applies several recommended environment tweaks when they are
+not already present:
+
+- `AFL_SKIP_CPUFREQ=1` to ignore CPU frequency scaling checks.
+- `AFL_SKIP_BIN_CHECK=1` so AFL++ accepts the managed SharpFuzz harness.
+- `AFL_IMPORT_FIRST=1` to prioritise importing synced queue entries from other
+  fuzzers.
+- `AFL_IGNORE_SEED_PROBLEMS=1` to skip crashing or hanging seeds during warmup.
+- `AFL_TESTCACHE_SIZE=200` (megabytes) to cache test cases in RAM; override the
+  value with `--testcache <mb>` or by exporting `AFL_TESTCACHE_SIZE` manually.
+
+`/proc/sys/kernel/core_pattern` is inspected before fuzzing. If the kernel is
+configured to pipe core dumps to another process, the helper exports
+`AFL_I_DONT_CARE_ABOUT_MISSING_CRASHES=1` so AFL++ continues to run. Adjust the
+core pattern to `core` before fuzzing if you would rather collect crash dumps
+immediately:
 
 ```bash
 echo core | sudo tee /proc/sys/kernel/core_pattern
 ```
 
 To reuse existing instrumented binaries, pass `--skip-instrument`. Additional
-`afl-fuzz` flags can be forwarded by appending them after `--`. For example, to
-resume from an existing corpus:
+`afl-fuzz` flags can be forwarded by appending them after `--`; in that mode the
+helper does not spawn the multi-core campaign and simply relays the options you
+provide. For example, to resume from an existing corpus:
 
 ```bash
 ./tools/run-gir-core-fuzz.sh afl --skip-instrument -- -i src/Tests/Fuzzing/SourceFuncFuzzer/corpus -o /tmp/source-func-findings \
