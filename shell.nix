@@ -17,7 +17,7 @@ pkgs.mkShell {
 
   shellHook = ''
     repo_root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
-    export DOTNET_CLI_HOME="\${DOTNET_CLI_HOME:-$repo_root/.dotnet}"
+    export DOTNET_CLI_HOME="''${DOTNET_CLI_HOME:-$repo_root/.dotnet}"
     export PATH="$DOTNET_CLI_HOME/tools:$PATH"
 
     props_file="$repo_root/properties/GirCore.Fuzzing.props"
@@ -36,7 +36,7 @@ pkgs.mkShell {
       if [ ! -x "$DOTNET_CLI_HOME/tools/sharpfuzz" ]; then
         dotnet tool install SharpFuzz.CommandLine --tool-path "$DOTNET_CLI_HOME/tools" --version "$SHARPFUZZ_VERSION"
       else
-        INSTALLED_VERSION=$("$DOTNET_CLI_HOME/tools/sharpfuzz" --version 2>/dev/null | sed -n 's/[^0-9]*\([0-9][0-9.]*\).*/\1/p' | head -n 1)
+        INSTALLED_VERSION=$("$DOTNET_CLI_HOME/tools/sharpfuzz" --version 2>/dev/null | awk 'NF { print $NF; exit }')
 
         if [ "$INSTALLED_VERSION" != "$SHARPFUZZ_VERSION" ]; then
           dotnet tool update SharpFuzz.CommandLine --tool-path "$DOTNET_CLI_HOME/tools" --version "$SHARPFUZZ_VERSION"
