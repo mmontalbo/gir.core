@@ -17,13 +17,13 @@ pkgs.mkShell {
 
   shellHook = ''
     repo_root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
-    export DOTNET_CLI_HOME="${DOTNET_CLI_HOME:-$repo_root/.dotnet}"
+    export DOTNET_CLI_HOME="\${DOTNET_CLI_HOME:-$repo_root/.dotnet}"
     export PATH="$DOTNET_CLI_HOME/tools:$PATH"
 
     props_file="$repo_root/properties/GirCore.Fuzzing.props"
 
     if [ -f "$props_file" ]; then
-      SHARPFUZZ_VERSION=$(sed -n 's/.*<SharpFuzzVersion>\(.*\)<\/SharpFuzzVersion>.*/\1/p' "$props_file" | head -n 1)
+      SHARPFUZZ_VERSION=$(sed -n 's|.*<SharpFuzzVersion>\(.*\)</SharpFuzzVersion>.*|\1|p' "$props_file" | head -n 1)
     else
       SHARPFUZZ_VERSION=""
     fi
