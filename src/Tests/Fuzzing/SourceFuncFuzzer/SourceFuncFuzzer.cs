@@ -159,7 +159,7 @@ public static class SourceFuncFuzzer
     {
         if (parameters.Length == 0)
         {
-            return Array.Empty<object?>();
+            return System.Array.Empty<object?>();
         }
 
         var arguments = new object?[parameters.Length];
