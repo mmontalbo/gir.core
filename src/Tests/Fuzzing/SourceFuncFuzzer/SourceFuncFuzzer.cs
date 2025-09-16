@@ -395,6 +395,55 @@ public static class SourceFuncFuzzer
         Forever,
     }
 
+    private ref struct ScenarioDefaults
+    {
+        private uint state;
+
+        public ScenarioDefaults(byte seed)
+        {
+            state = (uint)(seed == 0 ? 1 : seed);
+        }
+
+        public HandlerKind NextHandler()
+        {
+            return (HandlerKind)(NextByte() % 4);
+        }
+
+        public byte NextByte()
+        {
+            state = unchecked(state * 1103515245 + 12345);
+            return (byte)(state >> 24);
+        }
+
+        public bool NextBool()
+        {
+            return (NextByte() & 1) != 0;
+        }
+
+        public ushort NextUInt16()
+        {
+            var lower = NextByte();
+            var upper = NextByte();
+            return (ushort)(lower | (upper << 8));
+        }
+
+        public int NextInt32()
+        {
+            var b0 = NextByte();
+            var b1 = NextByte();
+            var b2 = NextByte();
+            var b3 = NextByte();
+            return b0 | (b1 << 8) | (b2 << 16) | (b3 << 24);
+        }
+
+        public long NextInt64()
+        {
+            var lower = (uint)NextInt32();
+            var upper = (uint)NextInt32();
+            return (long)lower | ((long)upper << 32);
+        }
+    }
+
     private sealed class CallbackPlan
     {
         private readonly bool[] pattern;
@@ -589,55 +638,6 @@ internal ref struct FuzzDataReader
         return TryReadInt64(out var value)
             ? value
             : throw new EndOfStreamException("The fuzzing input terminated unexpectedly.");
-    }
-}
-
-internal ref struct ScenarioDefaults
-{
-    private uint state;
-
-    public ScenarioDefaults(byte seed)
-    {
-        state = (uint)(seed == 0 ? 1 : seed);
-    }
-
-    public HandlerKind NextHandler()
-    {
-        return (HandlerKind)(NextByte() % 4);
-    }
-
-    public byte NextByte()
-    {
-        state = unchecked(state * 1103515245 + 12345);
-        return (byte)(state >> 24);
-    }
-
-    public bool NextBool()
-    {
-        return (NextByte() & 1) != 0;
-    }
-
-    public ushort NextUInt16()
-    {
-        var lower = NextByte();
-        var upper = NextByte();
-        return (ushort)(lower | (upper << 8));
-    }
-
-    public int NextInt32()
-    {
-        var b0 = NextByte();
-        var b1 = NextByte();
-        var b2 = NextByte();
-        var b3 = NextByte();
-        return b0 | (b1 << 8) | (b2 << 16) | (b3 << 24);
-    }
-
-    public long NextInt64()
-    {
-        var lower = (uint)NextInt32();
-        var upper = (uint)NextInt32();
-        return (long)lower | ((long)upper << 32);
     }
 }
 
