@@ -71,3 +71,28 @@ GIR_CORE_ROOT=/path/to/gir.core ./tools/run-gir-core-fuzz.sh
 Once instrumentation succeeds, use the binaries within the `instrumented`
 folder as the harness payload for your fuzzer. You can re-run the script at any
 time to rebuild the harness after making changes.
+
+## Running AFL++
+
+To instrument the harness and immediately start fuzzing with AFL++, run:
+
+```bash
+./tools/run-gir-core-fuzz.sh afl
+```
+
+If instrumentation is required, the script rebuilds the harness before launching
+`afl-fuzz`. A seed corpus containing a single empty input is created in
+`src/Tests/Fuzzing/SourceFuncFuzzer/corpus`, and findings are written to a
+timestamped directory under `src/Tests/Fuzzing/SourceFuncFuzzer/findings`.
+
+To reuse existing instrumented binaries, pass `--skip-instrument`. Additional
+`afl-fuzz` flags can be forwarded by appending them after `--`. For example, to
+resume from an existing corpus:
+
+```bash
+./tools/run-gir-core-fuzz.sh afl --skip-instrument -- -i src/Tests/Fuzzing/SourceFuncFuzzer/corpus -o /tmp/source-func-findings -m none
+```
+
+`afl-fuzz` must be available on your `PATH`. The provided `nix-shell`
+environment automatically installs AFL++ and exposes the `afl-fuzz` command so
+the script works without additional setup.
