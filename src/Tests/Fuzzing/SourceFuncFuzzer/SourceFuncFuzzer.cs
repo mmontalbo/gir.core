@@ -2,8 +2,8 @@ using System;
 using System.Buffers;
 using System.IO;
 using System.Reflection;
-using GLib;
 using GLib.Internal;
+using ManagedSourceFunc = GLib.SourceFunc;
 
 namespace GirCore.Fuzzing;
 
@@ -11,7 +11,7 @@ public static class SourceFuncFuzzer
 {
     private const int MaxInputLength = 4096;
     private const int MaxOperationCount = 32;
-    private static readonly SourceFunc DefaultCallback = () => false;
+    private static readonly ManagedSourceFunc DefaultCallback = () => false;
 
     public static void Run(Stream stream)
     {
@@ -75,7 +75,7 @@ public static class SourceFuncFuzzer
         var destroyAfter = reader.ReadBool();
         var userData = new IntPtr(reader.ReadInt32());
 
-        SourceFunc? managed = handler == HandlerKind.Notified && reader.ReadBool()
+        ManagedSourceFunc? managed = handler == HandlerKind.Notified && reader.ReadBool()
             ? null
             : CreateCallback(ref reader);
 
@@ -96,7 +96,7 @@ public static class SourceFuncFuzzer
         }
     }
 
-    private static void RunNotified(SourceFunc? managed, int invocationCount, IntPtr userData, bool destroyBefore, bool destroyAfter, ref FuzzDataReader reader)
+    private static void RunNotified(ManagedSourceFunc? managed, int invocationCount, IntPtr userData, bool destroyBefore, bool destroyAfter, ref FuzzDataReader reader)
     {
         var handler = new SourceFuncNotifiedHandler(managed);
 
@@ -113,19 +113,19 @@ public static class SourceFuncFuzzer
         }
     }
 
-    private static void RunAsync(SourceFunc managed, int invocationCount, IntPtr userData, ref FuzzDataReader reader)
+    private static void RunAsync(ManagedSourceFunc managed, int invocationCount, IntPtr userData, ref FuzzDataReader reader)
     {
         var handler = new SourceFuncAsyncHandler(managed);
         InvokeDelegate(handler.NativeCallback, ref reader, userData, invocationCount);
     }
 
-    private static void RunCall(SourceFunc managed, int invocationCount, IntPtr userData, ref FuzzDataReader reader)
+    private static void RunCall(ManagedSourceFunc managed, int invocationCount, IntPtr userData, ref FuzzDataReader reader)
     {
         var handler = new SourceFuncCallHandler(managed);
         InvokeDelegate(handler.NativeCallback, ref reader, userData, invocationCount);
     }
 
-    private static void RunForever(SourceFunc managed, int invocationCount, IntPtr userData, ref FuzzDataReader reader)
+    private static void RunForever(ManagedSourceFunc managed, int invocationCount, IntPtr userData, ref FuzzDataReader reader)
     {
         var handler = new SourceFuncForeverHandler(managed);
         InvokeDelegate(handler.NativeCallback, ref reader, userData, invocationCount);
@@ -252,7 +252,7 @@ public static class SourceFuncFuzzer
         return Activator.CreateInstance(type);
     }
 
-    private static SourceFunc CreateCallback(ref FuzzDataReader reader)
+    private static ManagedSourceFunc CreateCallback(ref FuzzDataReader reader)
     {
         var length = 1 + (reader.ReadByte() & 0x07);
         var pattern = new bool[length];
