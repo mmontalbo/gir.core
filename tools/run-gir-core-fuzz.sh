@@ -100,6 +100,31 @@ parse_args() {
   done
 }
 
+maybe_warn_core_pattern() {
+  local core_pattern_path="/proc/sys/kernel/core_pattern"
+
+  if [[ ! -r "${core_pattern_path}" ]]; then
+    return
+  fi
+
+  local core_pattern
+  core_pattern="$(<"${core_pattern_path}")"
+
+  if [[ "${core_pattern}" == \|* ]]; then
+    echo "Warning: ${core_pattern_path} pipes core dumps to an external handler." >&2
+    echo "         AFL++ may treat crashes as timeouts until this is adjusted." >&2
+
+    if [[ -z "${AFL_I_DONT_CARE_ABOUT_MISSING_CRASHES:-}" ]]; then
+      export AFL_I_DONT_CARE_ABOUT_MISSING_CRASHES=1
+      echo "         Setting AFL_I_DONT_CARE_ABOUT_MISSING_CRASHES=1 for this session." >&2
+      echo "         To handle crashes immediately instead, run 'echo core | sudo tee ${core_pattern_path}' before fuzzing." >&2
+    else
+      echo "         AFL_I_DONT_CARE_ABOUT_MISSING_CRASHES=${AFL_I_DONT_CARE_ABOUT_MISSING_CRASHES}." >&2
+      echo "         Consider adjusting ${core_pattern_path} to write core files directly." >&2
+    fi
+  fi
+}
+
 instrument_harness() {
   if [[ ! -f "${GENERATED_IMPORT_RESOLVER}" ]]; then
     echo "Generated bindings are required but ${GENERATED_IMPORT_RESOLVER} was not found." >&2
@@ -159,10 +184,18 @@ run_afl() {
     exit 1
   fi
 
+  local dotnet_path
+  dotnet_path="$(command -v dotnet)"
+
   if ! command -v afl-fuzz >/dev/null 2>&1; then
     echo "afl-fuzz was not found on PATH. Install AFL++ or enter the provided Nix shell." >&2
     exit 1
   fi
+
+  : "${AFL_SKIP_CPUFREQ:=1}"
+  export AFL_SKIP_CPUFREQ
+
+  maybe_warn_core_pattern
 
   if [[ ${SKIP_INSTRUMENT} -eq 0 ]]; then
     instrument_harness
@@ -188,10 +221,10 @@ run_afl() {
     echo "Launching AFL++ with seed corpus at ${corpus_dir}."
     echo "Findings will be written to ${findings_dir}."
 
-    afl_cmd=("afl-fuzz" "-i" "${corpus_dir}" "-o" "${findings_dir}" "--" "dotnet" "${ASSEMBLY_PATH}" "@@")
+    afl_cmd=("afl-fuzz" "-i" "${corpus_dir}" "-o" "${findings_dir}" "--" "${dotnet_path}" "${ASSEMBLY_PATH}" "@@")
   else
     echo "Launching AFL++ with custom arguments: ${AFL_ARGS[*]}"
-    afl_cmd=("afl-fuzz" "${AFL_ARGS[@]}" "--" "dotnet" "${ASSEMBLY_PATH}" "@@")
+    afl_cmd=("afl-fuzz" "${AFL_ARGS[@]}" "--" "${dotnet_path}" "${ASSEMBLY_PATH}" "@@")
   fi
 
   exec "${afl_cmd[@]}"
