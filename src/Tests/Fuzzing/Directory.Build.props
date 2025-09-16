@@ -3,6 +3,6 @@
   <Import Project="../../../properties/GirCore.Fuzzing.props" />
 
   <PropertyGroup>
-    <TargetFramework>net8.0</TargetFramework>
+    <TargetFramework>net9.0</TargetFramework>
   </PropertyGroup>
 </Project>

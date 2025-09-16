@@ -1,72 +1,18 @@
 { pkgs ? import <nixpkgs> {} }:
 
 let
-  dotnetSdk9 = pkgs.dotnet-sdk_9;
-  dotnetSdk8 = pkgs.dotnet-sdk_8;
-
-  dotnetRoot = pkgs.runCommand "dotnet-root" {} ''
-    set -eu
-
-    mkdir -p $out/share
-    cp -r ${dotnetSdk9}/share/dotnet $out/share/
-
-    copyVersioned() {
-      src="$1"
-      dest="$2"
-
-      if [ -d "$src" ]; then
-        mkdir -p "$dest"
-
-        for component in "$src"/8.*; do
-          if [ -e "$component" ]; then
-            cp -r "$component" "$dest/"
-          fi
-        done
-      fi
-    }
-
-    copyNested() {
-      src="$1"
-      dest="$2"
-
-      if [ -d "$src" ]; then
-        for parent in "$src"/*; do
-          if [ -d "$parent" ]; then
-            name="$(basename "$parent")"
-            mkdir -p "$dest/$name"
-
-            for component in "$parent"/8.*; do
-              if [ -e "$component" ]; then
-                cp -r "$component" "$dest/$name/"
-              fi
-            done
-          fi
-        done
-      fi
-    }
-
-    copyVersioned ${dotnetSdk8}/share/dotnet/sdk $out/share/dotnet/sdk
-    copyVersioned ${dotnetSdk8}/share/dotnet/host/fxr $out/share/dotnet/host/fxr
-    copyVersioned ${dotnetSdk8}/share/dotnet/shared/Microsoft.NETCore.App $out/share/dotnet/shared/Microsoft.NETCore.App
-    copyVersioned ${dotnetSdk8}/share/dotnet/shared/Microsoft.AspNetCore.App $out/share/dotnet/shared/Microsoft.AspNetCore.App
-    copyVersioned ${dotnetSdk8}/share/dotnet/shared/Microsoft.WindowsDesktop.App $out/share/dotnet/shared/Microsoft.WindowsDesktop.App
-    copyVersioned ${dotnetSdk8}/share/dotnet/templates $out/share/dotnet/templates
-    copyVersioned ${dotnetSdk8}/share/dotnet/sdk-manifests $out/share/dotnet/sdk-manifests
-    copyNested ${dotnetSdk8}/share/dotnet/packs $out/share/dotnet/packs
-  '';
-
+  dotnetSdk = pkgs.dotnet-sdk_9;
   cacert = pkgs.cacert;
 in
 pkgs.mkShell {
   packages = [
-    dotnetSdk9
+    dotnetSdk
     cacert
   ];
 
-  DOTNET_ROOT = "${dotnetRoot}/share/dotnet";
+  DOTNET_ROOT = "${dotnetSdk}/share/dotnet";
   DOTNET_CLI_TELEMETRY_OPTOUT = "1";
   DOTNET_NOLOGO = "1";
-  DOTNET_ROLL_FORWARD = "Major";
   SSL_CERT_FILE = "${cacert}/etc/ssl/certs/ca-bundle.crt";
 
   shellHook = ''

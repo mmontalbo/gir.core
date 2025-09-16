@@ -10,17 +10,17 @@ To follow the steps below you will need:
 
 - The [.NET 9 SDK](https://dotnet.microsoft.com/download/dotnet/9.0) available on
   your `PATH` so the `dotnet` CLI is accessible.
-- The [.NET 8 runtime](https://dotnet.microsoft.com/download/dotnet/8.0)
-  (`Microsoft.NETCore.App`) installed alongside the SDK. The SharpFuzz command-
-  line tool currently targets .NET 8 even when the harness is built with the
-  .NET 9 SDK.
-- The SharpFuzz command-line tool version `2.2.0` installed globally:
+- The SharpFuzz command-line tool version `2.2.0` installed (or updated) globally
+  with the .NET 9 SDK:
 
   ```bash
-  dotnet tool install --global SharpFuzz.CommandLine --version 2.2.0
+  dotnet tool update --global SharpFuzz.CommandLine --version 2.2.0
   ```
 
-  The same version is consumed by the harness via the central
+  If the tool has not been installed before, run the same command with
+  `install` instead of `update`. Installing or updating with the .NET 9 SDK
+  ensures the CLI uses the same runtime as the harness. The same version is
+  consumed by the harness via the central
   `SharpFuzzVersion` property in
   [`properties/GirCore.Fuzzing.props`](../properties/GirCore.Fuzzing.props).
 - A local clone of this repository (including submodules) with the generated
@@ -31,19 +31,17 @@ To follow the steps below you will need:
   ```
 
 If you are using [Nix](https://nixos.org), a development shell is provided that
-layers the .NET 9 SDK with the .NET 8 SDK/runtime inside `DOTNET_ROOT` and
-installs the matching SharpFuzz CLI locally. Enter it from the repository root
-by running:
+installs the .NET 9 SDK and the matching SharpFuzz CLI locally. Enter it from
+the repository root by running:
 
 ```bash
 nix-shell
 ```
 
-The shell hook will provision a local `.dotnet` tools directory, install or
-update `SharpFuzz.CommandLine` to the version pinned in
-[`properties/GirCore.Fuzzing.props`](../properties/GirCore.Fuzzing.props), and
-export `DOTNET_ROLL_FORWARD=Major` so the .NET 8 SharpFuzz tool can execute
-against the .NET 9 runtime.
+The shell hook provisions a local `.dotnet` tools directory and installs or
+updates `SharpFuzz.CommandLine` to the version pinned in
+[`properties/GirCore.Fuzzing.props`](../properties/GirCore.Fuzzing.props),
+ensuring the CLI targets .NET 9.
 
 ## Instrumenting the SourceFunc harness
 
