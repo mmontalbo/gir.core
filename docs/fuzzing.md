@@ -26,6 +26,14 @@ To follow the steps below you will need:
   dotnet fsi scripts/GenerateLibs.fsx
   ```
 
+If you are using [Nix](https://nixos.org), a development shell is provided that
+installs the required SDK and configures the SharpFuzz CLI locally. Enter it by
+running:
+
+```bash
+nix-shell
+```
+
 ## Instrumenting the SourceFunc harness
 
 After the prerequisites have been met, the harness can be built and
