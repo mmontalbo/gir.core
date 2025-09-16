@@ -221,7 +221,7 @@ run_afl() {
     local default_seed="${corpus_dir}/seed-default"
 
     if [[ ! -s "${default_seed}" ]]; then
-      printf '%s' $'\x00seed' >"${default_seed}"
+      printf 'seed' >"${default_seed}"
     fi
 
     mkdir -p "${findings_dir}"
