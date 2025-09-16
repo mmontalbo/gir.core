@@ -2,17 +2,22 @@
 
 let
   dotnetSdk = pkgs.dotnet-sdk_9;
-  dotnetRuntime8 = pkgs.dotnet-runtime_8;
+  dotnetRuntime8Shared = pkgs.runCommand "dotnet-runtime-8-shared" {} ''
+    mkdir -p $out/share/dotnet/shared
+    cp -r ${pkgs.dotnet-runtime_8}/share/dotnet/shared/Microsoft.NETCore.App \
+      $out/share/dotnet/shared/
+  '';
   dotnetRoot = pkgs.buildEnv {
     name = "dotnet-root";
-    paths = [ dotnetSdk dotnetRuntime8 ];
+    paths = [ dotnetSdk dotnetRuntime8Shared ];
     pathsToLink = [ "/share/dotnet" ];
+    ignoreCollisions = true;
   };
 in
 pkgs.mkShell {
   packages = [
     dotnetSdk
-    dotnetRuntime8
+    dotnetRuntime8Shared
   ];
 
   DOTNET_ROOT = "${dotnetRoot}/share/dotnet";
