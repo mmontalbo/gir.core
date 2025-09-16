@@ -31,12 +31,19 @@ To follow the steps below you will need:
   ```
 
 If you are using [Nix](https://nixos.org), a development shell is provided that
-installs the .NET 9 SDK, the .NET 8 runtime, and configures the SharpFuzz CLI
-locally. Enter it by running:
+layers the .NET 9 SDK with the .NET 8 SDK/runtime inside `DOTNET_ROOT` and
+installs the matching SharpFuzz CLI locally. Enter it from the repository root
+by running:
 
 ```bash
 nix-shell
 ```
+
+The shell hook will provision a local `.dotnet` tools directory, install or
+update `SharpFuzz.CommandLine` to the version pinned in
+[`properties/GirCore.Fuzzing.props`](../properties/GirCore.Fuzzing.props), and
+export `DOTNET_ROLL_FORWARD=Major` so the .NET 8 SharpFuzz tool can execute
+against the .NET 9 runtime.
 
 ## Instrumenting the SourceFunc harness
 

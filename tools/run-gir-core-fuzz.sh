@@ -4,6 +4,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${GIR_CORE_ROOT:-$(cd "${SCRIPT_DIR}/.." && pwd)}"
+export DOTNET_ROLL_FORWARD="${DOTNET_ROLL_FORWARD:-Major}"
+
 PROJECT_PATH="${REPO_ROOT}/src/Tests/Fuzzing/SourceFuncFuzzer/SourceFuncFuzzer.csproj"
 PROPS_FILE="${REPO_ROOT}/properties/GirCore.Fuzzing.props"
 GENERATED_IMPORT_RESOLVER="${REPO_ROOT}/src/Libs/GObject-2.0/Internal/ImportResolver.Generated.cs"
