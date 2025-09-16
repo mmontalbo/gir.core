@@ -161,3 +161,31 @@ Using the fully qualified `dotnet` path suppresses AFL++'s warning about an
 unqualified binary name. If `/proc/sys/kernel/core_pattern` pipes crash dumps to
 an external handler, either set `AFL_I_DONT_CARE_ABOUT_MISSING_CRASHES=1` or
 temporarily switch the core pattern to `core` as shown above.
+
+### Troubleshooting stalled coverage
+
+If the AFL++ dashboard stays red with "last new find: none yet (odd, check
+syntax!)", check the following before stopping the run:
+
+- **Confirm seeds are non-empty.** The helper enforces `AFL_INPUT_LEN_MIN=1`,
+  but manual runs should also ensure the queue never collapses to a zero-byte
+  testcase. A one-byte input is enough to drive the `SourceFunc` harness down a
+  deterministic handler path.
+- **Inspect the findings logs.** Every background worker writes to
+  `src/Tests/Fuzzing/SourceFuncFuzzer/findings/logs/<worker>.log`. Look for
+  repeated "Fuzzing test case #0" entries with a constant bitmap size; this
+  indicates AFL++ is repeatedly mutating the same minimal sample.
+- **Check queue contents.** Browse the `main-*/queue` directories inside the
+  findings folder. If you only see the original `seed-default`, drop in one or
+  two longer samples (e.g., a few dozen random bytes) and relaunch the helper to
+  give AFL++ additional leverage.
+- **Verify harness instrumentation.** The harness synthesises fallback values
+  once the input stream runs dry, so even very short inputs now execute the
+  handler switch. If the bitmap coverage counter still stays flat, rebuild the
+  harness via `./tools/run-gir-core-fuzz.sh` to ensure SharpFuzz instrumentation
+  is up to date.
+
+After new seeds are added or the harness is re-instrumented, relaunch the helper
+to continue fuzzing (use `--skip-instrument` if you only need to restart AFL++),
+or start a fresh findings directory if you want to compare coverage from
+scratch.

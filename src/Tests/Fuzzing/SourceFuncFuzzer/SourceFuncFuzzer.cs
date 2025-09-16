@@ -60,88 +60,113 @@ public static class SourceFuncFuzzer
     {
         var reader = new FuzzDataReader(data);
 
-        try
+        if (!reader.TryReadByte(out var header))
         {
-            var operations = Math.Min(MaxOperationCount, (reader.ReadByte() & 0x1F) + 1);
-
-            for (var i = 0; i < operations; i++)
-            {
-                ExecuteScenario(ref reader);
-            }
+            return;
         }
-        catch (EndOfStreamException)
+
+        var defaults = new ScenarioDefaults(header);
+        var operations = Math.Min(MaxOperationCount, (header & 0x1F) + 1);
+
+        for (var i = 0; i < operations; i++)
         {
-            // Truncated inputs are expected while fuzzing; stop processing and
-            // let AFL++ decide whether extending the testcase yields new
-            // coverage.
+            if (!ExecuteScenario(ref reader, ref defaults))
+            {
+                break;
+            }
         }
     }
 
-    private static void ExecuteScenario(ref FuzzDataReader reader)
+    private static bool ExecuteScenario(ref FuzzDataReader reader, ref ScenarioDefaults defaults)
     {
-        var handler = (HandlerKind)(reader.ReadByte() % 4);
-        var invocationCount = 1 + (reader.ReadByte() & 0x0F);
-        var destroyBefore = reader.ReadBool();
-        var destroyAfter = reader.ReadBool();
-        var userData = new IntPtr(reader.ReadInt32());
+        var exhausted = false;
 
-        ManagedSourceFunc? managed = handler == HandlerKind.Notified && reader.ReadBool()
-            ? null
-            : CreateCallback(ref reader);
+        HandlerKind handler;
+
+        if (reader.TryReadByte(out var handlerByte))
+        {
+            handler = (HandlerKind)(handlerByte % 4);
+        }
+        else
+        {
+            exhausted = true;
+            handler = defaults.NextHandler();
+        }
+
+        var invocationRaw = ReadByteOrFallback(ref reader, ref defaults, ref exhausted);
+        var invocationCount = 1 + (invocationRaw & 0x0F);
+
+        var destroyBefore = ReadBoolOrFallback(ref reader, ref defaults, ref exhausted);
+        var destroyAfter = ReadBoolOrFallback(ref reader, ref defaults, ref exhausted);
+        var userData = new IntPtr(ReadInt32OrFallback(ref reader, ref defaults, ref exhausted));
+
+        ManagedSourceFunc? managed;
+
+        if (handler == HandlerKind.Notified)
+        {
+            var skipManaged = ReadBoolOrFallback(ref reader, ref defaults, ref exhausted);
+            managed = skipManaged ? null : CreateCallback(ref reader, ref defaults, ref exhausted);
+        }
+        else
+        {
+            managed = CreateCallback(ref reader, ref defaults, ref exhausted);
+        }
 
         switch (handler)
         {
             case HandlerKind.Notified:
-                RunNotified(managed, invocationCount, userData, destroyBefore, destroyAfter, ref reader);
+                RunNotified(managed, invocationCount, userData, destroyBefore, destroyAfter, ref reader, ref defaults, ref exhausted);
                 break;
             case HandlerKind.Async:
-                RunAsync(managed ?? DefaultCallback, invocationCount, userData, ref reader);
+                RunAsync(managed ?? DefaultCallback, invocationCount, userData, ref reader, ref defaults, ref exhausted);
                 break;
             case HandlerKind.Call:
-                RunCall(managed ?? DefaultCallback, invocationCount, userData, ref reader);
+                RunCall(managed ?? DefaultCallback, invocationCount, userData, ref reader, ref defaults, ref exhausted);
                 break;
             case HandlerKind.Forever:
-                RunForever(managed ?? DefaultCallback, invocationCount, userData, ref reader);
+                RunForever(managed ?? DefaultCallback, invocationCount, userData, ref reader, ref defaults, ref exhausted);
                 break;
         }
+
+        return !exhausted || reader.RemainingBytes > 0;
     }
 
-    private static void RunNotified(ManagedSourceFunc? managed, int invocationCount, IntPtr userData, bool destroyBefore, bool destroyAfter, ref FuzzDataReader reader)
+    private static void RunNotified(ManagedSourceFunc? managed, int invocationCount, IntPtr userData, bool destroyBefore, bool destroyAfter, ref FuzzDataReader reader, ref ScenarioDefaults defaults, ref bool exhausted)
     {
         var handler = new SourceFuncNotifiedHandler(managed);
 
         if (destroyBefore)
         {
-            InvokeDelegate(handler.DestroyNotify, ref reader, userData, 1);
+            InvokeDelegate(handler.DestroyNotify, ref reader, ref defaults, userData, 1, ref exhausted);
         }
 
-        InvokeDelegate(handler.NativeCallback, ref reader, userData, invocationCount);
+        InvokeDelegate(handler.NativeCallback, ref reader, ref defaults, userData, invocationCount, ref exhausted);
 
         if (destroyAfter)
         {
-            InvokeDelegate(handler.DestroyNotify, ref reader, userData, 1);
+            InvokeDelegate(handler.DestroyNotify, ref reader, ref defaults, userData, 1, ref exhausted);
         }
     }
 
-    private static void RunAsync(ManagedSourceFunc managed, int invocationCount, IntPtr userData, ref FuzzDataReader reader)
+    private static void RunAsync(ManagedSourceFunc managed, int invocationCount, IntPtr userData, ref FuzzDataReader reader, ref ScenarioDefaults defaults, ref bool exhausted)
     {
         var handler = new SourceFuncAsyncHandler(managed);
-        InvokeDelegate(handler.NativeCallback, ref reader, userData, invocationCount);
+        InvokeDelegate(handler.NativeCallback, ref reader, ref defaults, userData, invocationCount, ref exhausted);
     }
 
-    private static void RunCall(ManagedSourceFunc managed, int invocationCount, IntPtr userData, ref FuzzDataReader reader)
+    private static void RunCall(ManagedSourceFunc managed, int invocationCount, IntPtr userData, ref FuzzDataReader reader, ref ScenarioDefaults defaults, ref bool exhausted)
     {
         var handler = new SourceFuncCallHandler(managed);
-        InvokeDelegate(handler.NativeCallback, ref reader, userData, invocationCount);
+        InvokeDelegate(handler.NativeCallback, ref reader, ref defaults, userData, invocationCount, ref exhausted);
     }
 
-    private static void RunForever(ManagedSourceFunc managed, int invocationCount, IntPtr userData, ref FuzzDataReader reader)
+    private static void RunForever(ManagedSourceFunc managed, int invocationCount, IntPtr userData, ref FuzzDataReader reader, ref ScenarioDefaults defaults, ref bool exhausted)
     {
         var handler = new SourceFuncForeverHandler(managed);
-        InvokeDelegate(handler.NativeCallback, ref reader, userData, invocationCount);
+        InvokeDelegate(handler.NativeCallback, ref reader, ref defaults, userData, invocationCount, ref exhausted);
     }
 
-    private static void InvokeDelegate(Delegate? callback, ref FuzzDataReader reader, IntPtr userData, int invocationCount)
+    private static void InvokeDelegate(Delegate? callback, ref FuzzDataReader reader, ref ScenarioDefaults defaults, IntPtr userData, int invocationCount, ref bool exhausted)
     {
         if (callback is null)
         {
@@ -152,7 +177,7 @@ public static class SourceFuncFuzzer
 
         for (var i = 0; i < invocationCount; i++)
         {
-            var arguments = CreateArguments(parameters, ref reader, userData);
+            var arguments = CreateArguments(parameters, ref reader, ref defaults, userData, ref exhausted);
 
             try
             {
@@ -165,7 +190,7 @@ public static class SourceFuncFuzzer
         }
     }
 
-    private static object?[] CreateArguments(ParameterInfo[] parameters, ref FuzzDataReader reader, IntPtr userData)
+    private static object?[] CreateArguments(ParameterInfo[] parameters, ref FuzzDataReader reader, ref ScenarioDefaults defaults, IntPtr userData, ref bool exhausted)
     {
         if (parameters.Length == 0)
         {
@@ -176,21 +201,21 @@ public static class SourceFuncFuzzer
 
         for (var i = 0; i < parameters.Length; i++)
         {
-            arguments[i] = CreateArgument(parameters[i], ref reader, userData);
+            arguments[i] = CreateArgument(parameters[i], ref reader, ref defaults, userData, ref exhausted);
         }
 
         return arguments;
     }
 
-    private static object? CreateArgument(ParameterInfo parameter, ref FuzzDataReader reader, IntPtr userData)
+    private static object? CreateArgument(ParameterInfo parameter, ref FuzzDataReader reader, ref ScenarioDefaults defaults, IntPtr userData, ref bool exhausted)
     {
         var parameterType = parameter.ParameterType;
         var elementType = parameterType.IsByRef ? parameterType.GetElementType()! : parameterType;
 
-        return CreateValue(elementType, ref reader, userData);
+        return CreateValue(elementType, ref reader, ref defaults, userData, ref exhausted);
     }
 
-    private static object? CreateValue(Type type, ref FuzzDataReader reader, IntPtr userData)
+    private static object? CreateValue(Type type, ref FuzzDataReader reader, ref ScenarioDefaults defaults, IntPtr userData, ref bool exhausted)
     {
         if (type == typeof(IntPtr) || type == typeof(nint))
         {
@@ -199,58 +224,118 @@ public static class SourceFuncFuzzer
 
         if (type == typeof(UIntPtr) || type == typeof(nuint))
         {
-            return (nuint)(ulong)(uint)reader.ReadInt32();
+            if (reader.TryReadInt32(out var raw))
+            {
+                return (nuint)(ulong)(uint)raw;
+            }
+
+            exhausted = true;
+            return (nuint)(ulong)(uint)defaults.NextInt32();
         }
 
         if (type == typeof(bool))
         {
-            return reader.ReadBool();
+            if (reader.TryReadBool(out var value))
+            {
+                return value;
+            }
+
+            exhausted = true;
+            return defaults.NextBool();
         }
 
         if (type == typeof(byte))
         {
-            return reader.ReadByte();
+            if (reader.TryReadByte(out var value))
+            {
+                return value;
+            }
+
+            exhausted = true;
+            return defaults.NextByte();
         }
 
         if (type == typeof(sbyte))
         {
-            return unchecked((sbyte)reader.ReadByte());
+            if (reader.TryReadByte(out var value))
+            {
+                return unchecked((sbyte)value);
+            }
+
+            exhausted = true;
+            return unchecked((sbyte)defaults.NextByte());
         }
 
         if (type == typeof(short))
         {
-            return unchecked((short)reader.ReadUInt16());
+            if (reader.TryReadUInt16(out var value))
+            {
+                return unchecked((short)value);
+            }
+
+            exhausted = true;
+            return unchecked((short)defaults.NextUInt16());
         }
 
         if (type == typeof(ushort))
         {
-            return reader.ReadUInt16();
+            if (reader.TryReadUInt16(out var value))
+            {
+                return value;
+            }
+
+            exhausted = true;
+            return defaults.NextUInt16();
         }
 
         if (type == typeof(int))
         {
-            return reader.ReadInt32();
+            if (reader.TryReadInt32(out var value))
+            {
+                return value;
+            }
+
+            exhausted = true;
+            return defaults.NextInt32();
         }
 
         if (type == typeof(uint))
         {
-            return unchecked((uint)reader.ReadInt32());
+            if (reader.TryReadInt32(out var value))
+            {
+                return unchecked((uint)value);
+            }
+
+            exhausted = true;
+            return unchecked((uint)defaults.NextInt32());
         }
 
         if (type == typeof(long))
         {
-            return reader.ReadInt64();
+            if (reader.TryReadInt64(out var value))
+            {
+                return value;
+            }
+
+            exhausted = true;
+            return defaults.NextInt64();
         }
 
         if (type == typeof(ulong))
         {
-            return unchecked((ulong)reader.ReadInt64());
+            if (reader.TryReadInt64(out var value))
+            {
+                return unchecked((ulong)value);
+            }
+
+            exhausted = true;
+            return unchecked((ulong)defaults.NextInt64());
         }
 
         if (type.IsEnum)
         {
             var underlying = Enum.GetUnderlyingType(type);
-            var raw = CreateValue(underlying, ref reader, userData);
+            var raw = CreateValue(underlying, ref reader, ref defaults, userData, ref exhausted);
             return raw is null ? Activator.CreateInstance(type) : Enum.ToObject(type, raw);
         }
 
@@ -262,17 +347,42 @@ public static class SourceFuncFuzzer
         return Activator.CreateInstance(type);
     }
 
-    private static ManagedSourceFunc CreateCallback(ref FuzzDataReader reader)
+    private static ManagedSourceFunc CreateCallback(ref FuzzDataReader reader, ref ScenarioDefaults defaults, ref bool exhausted)
     {
-        var length = 1 + (reader.ReadByte() & 0x07);
+        if (!reader.TryReadByte(out var lengthByte))
+        {
+            exhausted = true;
+            return DefaultCallback;
+        }
+
+        var length = 1 + (lengthByte & 0x07);
         var pattern = new bool[length];
 
         for (var i = 0; i < pattern.Length; i++)
         {
-            pattern[i] = reader.ReadBool();
+            if (reader.TryReadBool(out var value))
+            {
+                pattern[i] = value;
+            }
+            else
+            {
+                pattern[i] = defaults.NextBool();
+                exhausted = true;
+            }
         }
 
-        var mode = reader.ReadByte();
+        byte mode;
+
+        if (reader.TryReadByte(out var modeByte))
+        {
+            mode = modeByte;
+        }
+        else
+        {
+            mode = defaults.NextByte();
+            exhausted = true;
+        }
+
         var callback = new CallbackPlan(pattern, mode);
         return callback.Invoke;
     }
@@ -321,6 +431,38 @@ public static class SourceFuncFuzzer
             return result;
         }
     }
+    private static byte ReadByteOrFallback(ref FuzzDataReader reader, ref ScenarioDefaults defaults, ref bool exhausted)
+    {
+        if (reader.TryReadByte(out var value))
+        {
+            return value;
+        }
+
+        exhausted = true;
+        return defaults.NextByte();
+    }
+
+    private static bool ReadBoolOrFallback(ref FuzzDataReader reader, ref ScenarioDefaults defaults, ref bool exhausted)
+    {
+        if (reader.TryReadBool(out var value))
+        {
+            return value;
+        }
+
+        exhausted = true;
+        return defaults.NextBool();
+    }
+
+    private static int ReadInt32OrFallback(ref FuzzDataReader reader, ref ScenarioDefaults defaults, ref bool exhausted)
+    {
+        if (reader.TryReadInt32(out var value))
+        {
+            return value;
+        }
+
+        exhausted = true;
+        return defaults.NextInt32();
+    }
 }
 
 internal ref struct FuzzDataReader
@@ -334,49 +476,168 @@ internal ref struct FuzzDataReader
         offset = 0;
     }
 
-    public byte ReadByte()
+    public int RemainingBytes => data.Length - offset;
+
+    public bool TryReadByte(out byte value)
     {
         if (offset >= data.Length)
+        {
+            value = 0;
+            return false;
+        }
+
+        value = data[offset++];
+        return true;
+    }
+
+    public bool TryReadBool(out bool value)
+    {
+        if (TryReadByte(out var raw))
+        {
+            value = (raw & 1) != 0;
+            return true;
+        }
+
+        value = false;
+        return false;
+    }
+
+    public bool TryReadUInt16(out ushort value)
+    {
+        if (RemainingBytes < 2)
+        {
+            value = 0;
+            return false;
+        }
+
+        var lower = data[offset];
+        var upper = data[offset + 1];
+        offset += 2;
+        value = (ushort)(lower | (upper << 8));
+        return true;
+    }
+
+    public bool TryReadInt32(out int value)
+    {
+        if (RemainingBytes < 4)
+        {
+            value = 0;
+            return false;
+        }
+
+        value = data[offset]
+            | (data[offset + 1] << 8)
+            | (data[offset + 2] << 16)
+            | (data[offset + 3] << 24);
+        offset += 4;
+        return true;
+    }
+
+    public bool TryReadInt64(out long value)
+    {
+        if (RemainingBytes < 8)
+        {
+            value = 0;
+            return false;
+        }
+
+        value = (long)data[offset]
+            | ((long)data[offset + 1] << 8)
+            | ((long)data[offset + 2] << 16)
+            | ((long)data[offset + 3] << 24)
+            | ((long)data[offset + 4] << 32)
+            | ((long)data[offset + 5] << 40)
+            | ((long)data[offset + 6] << 48)
+            | ((long)data[offset + 7] << 56);
+        offset += 8;
+        return true;
+    }
+
+    public byte ReadByte()
+    {
+        if (!TryReadByte(out var value))
         {
             throw new EndOfStreamException("The fuzzing input terminated unexpectedly.");
         }
 
-        return data[offset++];
+        return value;
     }
 
     public bool ReadBool()
     {
-        return (ReadByte() & 1) != 0;
+        return TryReadBool(out var value)
+            ? value
+            : throw new EndOfStreamException("The fuzzing input terminated unexpectedly.");
     }
 
     public ushort ReadUInt16()
     {
-        var lower = ReadByte();
-        var upper = ReadByte();
-        return (ushort)(lower | (upper << 8));
+        return TryReadUInt16(out var value)
+            ? value
+            : throw new EndOfStreamException("The fuzzing input terminated unexpectedly.");
     }
 
     public int ReadInt32()
     {
-        var value = 0;
-
-        for (var i = 0; i < 4; i++)
-        {
-            value |= ReadByte() << (8 * i);
-        }
-
-        return value;
+        return TryReadInt32(out var value)
+            ? value
+            : throw new EndOfStreamException("The fuzzing input terminated unexpectedly.");
     }
 
     public long ReadInt64()
     {
-        long value = 0;
-
-        for (var i = 0; i < 8; i++)
-        {
-            value |= (long)ReadByte() << (8 * i);
-        }
-
-        return value;
+        return TryReadInt64(out var value)
+            ? value
+            : throw new EndOfStreamException("The fuzzing input terminated unexpectedly.");
     }
 }
+
+internal ref struct ScenarioDefaults
+{
+    private uint state;
+
+    public ScenarioDefaults(byte seed)
+    {
+        state = (uint)(seed == 0 ? 1 : seed);
+    }
+
+    public HandlerKind NextHandler()
+    {
+        return (HandlerKind)(NextByte() % 4);
+    }
+
+    public byte NextByte()
+    {
+        state = unchecked(state * 1103515245 + 12345);
+        return (byte)(state >> 24);
+    }
+
+    public bool NextBool()
+    {
+        return (NextByte() & 1) != 0;
+    }
+
+    public ushort NextUInt16()
+    {
+        var lower = NextByte();
+        var upper = NextByte();
+        return (ushort)(lower | (upper << 8));
+    }
+
+    public int NextInt32()
+    {
+        var b0 = NextByte();
+        var b1 = NextByte();
+        var b2 = NextByte();
+        var b3 = NextByte();
+        return b0 | (b1 << 8) | (b2 << 16) | (b3 << 24);
+    }
+
+    public long NextInt64()
+    {
+        var lower = (uint)NextInt32();
+        var upper = (uint)NextInt32();
+        return (long)lower | ((long)upper << 32);
+    }
+}
+
