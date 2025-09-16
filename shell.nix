@@ -8,6 +8,7 @@ pkgs.mkShell {
   packages = [
     dotnetSdk
     cacert
+    pkgs.aflplusplus
   ];
 
   DOTNET_ROOT = "${dotnetSdk}/share/dotnet";
@@ -19,6 +20,7 @@ pkgs.mkShell {
     repo_root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
     export DOTNET_CLI_HOME="''${DOTNET_CLI_HOME:-$repo_root/.dotnet}"
     export PATH="$DOTNET_CLI_HOME/tools:$PATH"
+    export AFL_SKIP_CPUFREQ="''${AFL_SKIP_CPUFREQ:-1}"
 
     props_file="$repo_root/properties/GirCore.Fuzzing.props"
 

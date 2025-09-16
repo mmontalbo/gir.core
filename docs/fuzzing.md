@@ -31,8 +31,9 @@ To follow the steps below you will need:
   ```
 
 If you are using [Nix](https://nixos.org), a development shell is provided that
-installs the .NET 9 SDK and the matching SharpFuzz CLI locally. Enter it from
-the repository root by running:
+installs the .NET 9 SDK, the matching SharpFuzz CLI, and
+[AFL++](https://github.com/AFLplusplus/AFLplusplus) locally. Enter it from the
+repository root by running:
 
 ```bash
 nix-shell
@@ -41,7 +42,8 @@ nix-shell
 The shell hook provisions a local `.dotnet` tools directory and installs or
 updates `SharpFuzz.CommandLine` to the version pinned in
 [`properties/GirCore.Fuzzing.props`](../properties/GirCore.Fuzzing.props),
-ensuring the CLI targets .NET 9.
+ensuring the CLI targets .NET 9 while exposing the `afl-fuzz` binary on your
+`PATH`.
 
 ## Instrumenting the SourceFunc harness
 
