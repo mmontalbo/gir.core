@@ -59,11 +59,21 @@ public static class SourceFuncFuzzer
     private static void Execute(ReadOnlySpan<byte> data)
     {
         var reader = new FuzzDataReader(data);
-        var operations = Math.Min(MaxOperationCount, (reader.ReadByte() & 0x1F) + 1);
 
-        for (var i = 0; i < operations; i++)
+        try
         {
-            ExecuteScenario(ref reader);
+            var operations = Math.Min(MaxOperationCount, (reader.ReadByte() & 0x1F) + 1);
+
+            for (var i = 0; i < operations; i++)
+            {
+                ExecuteScenario(ref reader);
+            }
+        }
+        catch (EndOfStreamException)
+        {
+            // Truncated inputs are expected while fuzzing; stop processing and
+            // let AFL++ decide whether extending the testcase yields new
+            // coverage.
         }
     }
 
@@ -328,7 +338,7 @@ internal ref struct FuzzDataReader
     {
         if (offset >= data.Length)
         {
-            return 0;
+            throw new EndOfStreamException("The fuzzing input terminated unexpectedly.");
         }
 
         return data[offset++];
