@@ -10,14 +10,34 @@ internal static class CallbackCommonHandlerRenderUtils
     {
         var parameterData = ParameterToManagedExpression.Initialize(callback.Parameters);
 
+        var guardStatement = RenderGuardStatement(callback, scope);
+        var guardSection = string.IsNullOrEmpty(guardStatement)
+            ? string.Empty
+            : $"    {guardStatement}\n";
+
         return $@"
 NativeCallback = ({GetParameterDefinition(parameterData)}{Error.RenderCallback(callback)}) => {{
-    {RenderConvertParameterStatements(parameterData)}
+{guardSection}    {RenderConvertParameterStatements(parameterData)}
     {RenderCallStatement(callback, parameterData, out var resultVariableName)}
     {RenderPostCallStatements(parameterData)}
     {RenderFreeStatement(scope)}
     {RenderReturnStatement(callback, resultVariableName)}
 }};";
+    }
+
+    private static string RenderGuardStatement(GirModel.Callback callback, GirModel.Scope? scope)
+    {
+        if (scope is not GirModel.Scope.Notified)
+        {
+            return string.Empty;
+        }
+
+        if (callback.ReturnType.AnyType.Is<GirModel.Void>())
+        {
+            return "if (!gch.IsAllocated)\n        return;";
+        }
+
+        return "if (!gch.IsAllocated)\n        return default;";
     }
 
     private static string GetParameterDefinition(IReadOnlyList<ParameterToManagedData> parameterData)
