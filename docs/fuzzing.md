@@ -51,7 +51,7 @@ After the prerequisites have been met, the harness can be built and
 instrumented using the helper script:
 
 ```bash
-./tools/run-gir-core-fuzz.sh
+./tools/run_gir_core_fuzz.py
 ```
 
 The script verifies that both the `dotnet` CLI and the SharpFuzz tool are
@@ -65,7 +65,7 @@ The script may be executed from outside of the repository by pointing
 `GIR_CORE_ROOT` at your checkout:
 
 ```bash
-GIR_CORE_ROOT=/path/to/gir.core ./tools/run-gir-core-fuzz.sh
+GIR_CORE_ROOT=/path/to/gir.core ./tools/run_gir_core_fuzz.py
 ```
 
 Once instrumentation succeeds, use the binaries within the `instrumented`
@@ -77,7 +77,7 @@ time to rebuild the harness after making changes.
 To instrument the harness and immediately start fuzzing with AFL++, run:
 
 ```bash
-./tools/run-gir-core-fuzz.sh afl
+./tools/run_gir_core_fuzz.py afl
 ```
 
 If instrumentation is required, the script rebuilds the harness before launching
@@ -131,7 +131,7 @@ helper does not spawn the multi-core campaign and simply relays the options you
 provide. For example, to resume from an existing corpus:
 
 ```bash
-./tools/run-gir-core-fuzz.sh afl --skip-instrument -- -i src/Tests/Fuzzing/SourceFuncFuzzer/corpus -o /tmp/source-func-findings \
+./tools/run_gir_core_fuzz.py afl --skip-instrument -- -i src/Tests/Fuzzing/SourceFuncFuzzer/corpus -o /tmp/source-func-findings \
   -m none
 ```
 
@@ -139,10 +139,36 @@ provide. For example, to resume from an existing corpus:
 environment automatically installs AFL++ and exposes the `afl-fuzz` command so
 the script works without additional setup.
 
+### Analyzing crashes
+
+Once AFL++ discovers crashing testcases you can inspect them directly with the helper:
+
+```bash
+./tools/run_gir_core_fuzz.py analyze
+```
+
+By default the command targets the newest `findings/run-*` directory and prints a
+signal summary together with the first crashes in the queue. Use
+`--list-runs` to display every recorded campaign or `--findings` to point at a
+specific output folder.
+
+Provide `--show` followed by a crash index, `id:<nnnnnn>`, or a relative path to
+view detailed metadata, a short hexdump, and ready-to-run reproduction commands.
+For example, `./tools/run_gir_core_fuzz.py analyze --show id:000123` prints the
+crash details without executing the harness. Pair the option with
+`--max-bytes` to control the amount of input dumped.
+
+When you want to reproduce a failure, pass the same identifier to `--replay` and
+the helper will stream the testcase into the instrumented harness via `dotnet`,
+printing its stdout, stderr, and exit status. The harness must have been
+instrumented beforehand (`instrument` or the default command) so the managed
+assembly is available under `src/Tests/Fuzzing/SourceFuncFuzzer/bin/Release/
+instrumented`.
+
 ### Running AFL++ manually
 
 The instrumented harness can also be fuzzed without the helper script. After
-running `./tools/run-gir-core-fuzz.sh` (or `./tools/run-gir-core-fuzz.sh
+running `./tools/run_gir_core_fuzz.py` (or `./tools/run_gir_core_fuzz.py
 instrument`), execute the following commands from the repository root:
 
 ```bash
@@ -188,7 +214,7 @@ syntax!)", check the following before stopping the run:
 - **Verify harness instrumentation.** The harness synthesises fallback values
   once the input stream runs dry, so even very short inputs now execute the
   handler switch. If the bitmap coverage counter still stays flat, rebuild the
-  harness via `./tools/run-gir-core-fuzz.sh` to ensure SharpFuzz instrumentation
+  harness via `./tools/run_gir_core_fuzz.py` to ensure SharpFuzz instrumentation
   is up to date.
 
 After new seeds are added or the harness is re-instrumented, relaunch the helper
