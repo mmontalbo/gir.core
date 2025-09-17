@@ -26,5 +26,7 @@ items:
     href: docs/contributing.md
   - name: Build
     href: docs/build.md
+  - name: Fuzzing
+    href: fuzzing.md
   - name: Github
     href: https://github.com/gircore/
