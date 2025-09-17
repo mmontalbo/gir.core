@@ -10,10 +10,10 @@ internal static class CallbackCommonHandlerRenderUtils
     {
         var parameterData = ParameterToManagedExpression.Initialize(callback.Parameters);
 
-        var guardStatement = RenderGuardStatement(callback, scope);
+        var guardStatement = RenderGuardStatement(callback, scope, parameterData);
         var guardSection = string.IsNullOrEmpty(guardStatement)
             ? string.Empty
-            : $"    {guardStatement}\n";
+            : $"{guardStatement}\n";
 
         return $@"
 NativeCallback = ({GetParameterDefinition(parameterData)}{Error.RenderCallback(callback)}) => {{
@@ -25,19 +25,44 @@ NativeCallback = ({GetParameterDefinition(parameterData)}{Error.RenderCallback(c
 }};";
     }
 
-    private static string RenderGuardStatement(GirModel.Callback callback, GirModel.Scope? scope)
+    private static string RenderGuardStatement(GirModel.Callback callback, GirModel.Scope? scope, IReadOnlyList<ParameterToManagedData> parameterData)
     {
         if (scope is not GirModel.Scope.Notified)
         {
             return string.Empty;
         }
 
-        if (callback.ReturnType.AnyType.Is<GirModel.Void>())
+        var guard = new StringBuilder();
+
+        guard.AppendLine("    if (!gch.IsAllocated)");
+        guard.AppendLine("    {");
+
+        foreach (var parameter in parameterData)
         {
-            return "if (!gch.IsAllocated)\n        return;";
+            if (parameter.IsCallbackDestroyNotify)
+                continue;
+
+            if (parameter.IsCallbackUserData)
+                continue;
+
+            if (parameter.IsArrayLengthParameter)
+                continue;
+
+            if (parameter.Parameter.Direction == GirModel.Direction.Out)
+                guard.AppendLine($"        {parameter.GetSignatureName()} = default;");
         }
 
-        return "if (!gch.IsAllocated)\n        return default;";
+        if (callback.Throws)
+            guard.AppendLine("        error = default;");
+
+        if (callback.ReturnType.AnyType.Is<GirModel.Void>())
+            guard.AppendLine("        return;");
+        else
+            guard.AppendLine("        return default;");
+
+        guard.Append("    }");
+
+        return guard.ToString();
     }
 
     private static string GetParameterDefinition(IReadOnlyList<ParameterToManagedData> parameterData)
