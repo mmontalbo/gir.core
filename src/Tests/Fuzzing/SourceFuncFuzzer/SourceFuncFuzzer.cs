@@ -12,6 +12,9 @@ public static class SourceFuncFuzzer
     private const int MaxInputLength = 4096;
     private const int MaxOperationCount = 32;
     private static readonly ManagedSourceFunc DefaultCallback = () => false;
+    private static readonly System.Collections.Generic.Dictionary<int, int> CoverageSlots = new();
+    private static readonly object CoverageLock = new();
+    private static int NextCoverageSlot;
 
     public static void Run(Stream stream)
     {
@@ -60,6 +63,15 @@ public static class SourceFuncFuzzer
     {
         var reader = new FuzzDataReader(data);
 
+        TraceEdge(0x7000 | Math.Min(data.Length, 0x3F));
+
+        var prefixLimit = Math.Min(data.Length, 8);
+
+        for (var i = 0; i < prefixLimit; i++)
+        {
+            TraceEdge(0x7100 | (i << 8) | data[i]);
+        }
+
         if (!reader.TryReadByte(out var header))
         {
             return;
@@ -102,14 +114,41 @@ public static class SourceFuncFuzzer
 
         ManagedSourceFunc? managed;
 
+        TraceEdge(0x1000 | (int)handler);
+        TraceEdge(0x2000 | Math.Min(invocationCount, 0x1F));
+
+        if (destroyBefore)
+        {
+            TraceEdge(0x3000);
+        }
+        else
+        {
+            TraceEdge(0x3001);
+        }
+
+        if (destroyAfter)
+        {
+            TraceEdge(0x3002);
+        }
+        else
+        {
+            TraceEdge(0x3003);
+        }
+
         if (handler == HandlerKind.Notified)
         {
             var skipManaged = ReadBoolOrFallback(ref reader, ref defaults, ref exhausted);
+            TraceEdge(skipManaged ? 0x4000 : 0x4001);
             managed = skipManaged ? null : CreateCallback(ref reader, ref defaults, ref exhausted);
         }
         else
         {
             managed = CreateCallback(ref reader, ref defaults, ref exhausted);
+        }
+
+        if (handler == HandlerKind.Async && invocationCount > 1)
+        {
+            invocationCount = 1;
         }
 
         switch (handler)
@@ -128,7 +167,88 @@ public static class SourceFuncFuzzer
                 break;
         }
 
-        return !exhausted || reader.RemainingBytes > 0;
+        var continuation = !exhausted || reader.RemainingBytes > 0;
+        TraceEdge(0x5000 | (exhausted ? 0x1 : 0) | (reader.RemainingBytes > 0 ? 0x2 : 0));
+        return continuation;
+    }
+
+    private static bool IsTracingEnabled()
+    {
+        var value = System.Environment.GetEnvironmentVariable("SOURCEFUNC_FUZZ_TRACE");
+        return string.Equals(value, "1", System.StringComparison.Ordinal);
+    }
+
+    private static unsafe void TraceEdge(int id)
+    {
+        var shared = TraceAccessor.GetSharedMem();
+
+        if (IsTracingEnabled())
+        {
+            var state = shared is null ? "trace: shared null" : $"trace: shared ready {id:x4}";
+            System.Console.Error.WriteLine(state);
+        }
+
+        if (shared is null)
+        {
+            return;
+        }
+
+        var index = GetCoverageSlot(id);
+        var slot = shared + index;
+        *slot |= 1;
+    }
+
+    private static int GetCoverageSlot(int key)
+    {
+        lock (CoverageLock)
+        {
+            if (!CoverageSlots.TryGetValue(key, out var index))
+            {
+                index = NextCoverageSlot++ & 0xFFFF;
+                CoverageSlots[key] = index;
+            }
+
+            return index;
+        }
+    }
+
+    private static class TraceAccessor
+    {
+        private static readonly System.Reflection.FieldInfo? SharedMemField;
+
+        static TraceAccessor()
+        {
+            var traceType = Type.GetType("SharpFuzz.Common.Trace, SharpFuzz.Common");
+
+            if (traceType is null)
+            {
+                return;
+            }
+
+            SharedMemField = traceType.GetField("SharedMem", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
+        }
+
+        public static unsafe byte* GetSharedMem()
+        {
+            if (SharedMemField is null)
+            {
+                return null;
+            }
+
+            var value = SharedMemField.GetValue(null);
+
+            switch (value)
+            {
+                case IntPtr ip when ip != IntPtr.Zero:
+                    return (byte*)ip;
+                case UIntPtr up when up != UIntPtr.Zero:
+                    return (byte*)(void*)up;
+                case System.Reflection.Pointer pointer:
+                    return (byte*)System.Reflection.Pointer.Unbox(pointer);
+                default:
+                    return null;
+            }
+        }
     }
 
     private static void RunNotified(ManagedSourceFunc? managed, int invocationCount, IntPtr userData, bool destroyBefore, bool destroyAfter, ref FuzzDataReader reader, ref ScenarioDefaults defaults, ref bool exhausted)
@@ -356,6 +476,7 @@ public static class SourceFuncFuzzer
         }
 
         var length = 1 + (lengthByte & 0x07);
+        TraceEdge(0x6000 | length);
         var pattern = new bool[length];
 
         for (var i = 0; i < pattern.Length; i++)
@@ -369,6 +490,9 @@ public static class SourceFuncFuzzer
                 pattern[i] = defaults.NextBool();
                 exhausted = true;
             }
+
+            var bitId = (i & 0x1F) << 1;
+            TraceEdge(0x6100 | bitId | (pattern[i] ? 0x1 : 0x0));
         }
 
         byte mode;
@@ -382,6 +506,8 @@ public static class SourceFuncFuzzer
             mode = defaults.NextByte();
             exhausted = true;
         }
+
+        TraceEdge(0x6200 | (mode & 0x3F));
 
         var callback = new CallbackPlan(pattern, mode);
         return callback.Invoke;
@@ -460,22 +586,28 @@ public static class SourceFuncFuzzer
         {
             var slot = index % pattern.Length;
             var result = pattern[slot];
+            TraceEdge(0x6300 | (slot & 0x1F));
 
             if ((mode & 0x1) != 0)
             {
                 result = !result;
+                TraceEdge(0x6400);
             }
 
             if ((mode & 0x2) != 0)
             {
                 pattern[slot] = !pattern[slot];
+                TraceEdge(0x6401);
             }
 
             if ((mode & 0x4) != 0 && index % 2 == 0)
             {
                 result = false;
+                TraceEdge(0x6402);
             }
 
+            TraceEdge(0x6500 | (mode & 0x3F));
+            TraceEdge(0x6600 | (result ? 0x1 : 0x0));
             index++;
             return result;
         }
@@ -640,4 +772,3 @@ internal ref struct FuzzDataReader
             : throw new EndOfStreamException("The fuzzing input terminated unexpectedly.");
     }
 }
-

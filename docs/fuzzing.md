@@ -94,6 +94,8 @@ secondary fuzzers with varied schedules and mutation modes. Secondary workers
 write their console output to `findings/logs/<name>.log` while the master keeps
 the interactive TUI in the invoking terminal. Use `--workers <count>` to set an
 explicit total, or `--single` to fall back to the legacy one-instance launch.
+When the managed harness grows beyond AFL++'s default 50 MB RSS limit, pass
+`--memory <mb|none>` to bump the cap (`--memory none` disables it entirely).
 
 The script also applies several recommended environment tweaks when they are
 not already present:
@@ -149,8 +151,7 @@ printf 'seed' > src/Tests/Fuzzing/SourceFuncFuzzer/corpus/seed-default
 AFL_SKIP_BIN_CHECK=1 AFL_INPUT_LEN_MIN=1 afl-fuzz -i src/Tests/Fuzzing/SourceFuncFuzzer/corpus \
   -o src/Tests/Fuzzing/SourceFuncFuzzer/findings \
   -- "$(command -v dotnet)" \
-  src/Tests/Fuzzing/SourceFuncFuzzer/bin/Release/instrumented/SourceFuncFuzzer.dll \
-  @@
+  src/Tests/Fuzzing/SourceFuncFuzzer/bin/Release/instrumented/SourceFuncFuzzer.dll
 ```
 
 Ensure the corpus directory always contains at least one non-empty seed; AFL++
@@ -171,6 +172,11 @@ syntax!)", check the following before stopping the run:
   but manual runs should also ensure the queue never collapses to a zero-byte
   testcase. A one-byte input is enough to drive the `SourceFunc` harness down a
   deterministic handler path.
+- **Make sure the harness is reading from STDIN.** The helper omits `@@` so
+  AFL++ streams testcases directly to the process. If you run `afl-fuzz`
+  manually, keep the command identical; otherwise the harness sees an empty
+  stream and coverage never increases. Export `SOURCEFUNC_FUZZ_TRACE=1` to dump
+  a per-iteration trace when debugging.
 - **Inspect the findings logs.** Every background worker writes to
   `src/Tests/Fuzzing/SourceFuncFuzzer/findings/logs/<worker>.log`. Look for
   repeated "Fuzzing test case #0" entries with a constant bitmap size; this

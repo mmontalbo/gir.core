@@ -28,6 +28,7 @@ Options:
   --skip-instrument    Skip rebuilding the harness when running the 'afl' command.
   --single             Launch a single AFL++ instance instead of a multi-core campaign.
   --workers <count>    Override the number of AFL++ instances (defaults to detected cores, capped at 32).
+  --memory <mb|none>   Override the AFL++ memory limit (-m). Use 'none' to disable the cap.
   --testcache <mb>     Set AFL_TESTCACHE_SIZE when launching AFL++ (default: 200 MB).
   -h, --help           Show this help text and exit.
 
@@ -38,7 +39,8 @@ secondary workers with varied schedules so the harness is fuzzed across multiple
 CPU cores. Pass --single to revert to the legacy one-worker behaviour, or append
 custom AFL++ parameters after "--" to take full control of the invocation.
 
-The harness command "dotnet ${ASSEMBLY_NAME} @@" is appended automatically.
+The harness command "dotnet ${ASSEMBLY_NAME}" is appended automatically and
+AFL++ streams inputs to the harness via STDIN.
 EOF
 }
 
@@ -47,9 +49,11 @@ SKIP_INSTRUMENT=0
 SERIOUS_MODE=1
 FORCE_SINGLE=0
 REQUESTED_WORKERS=""
+REQUESTED_MEMORY=""
 REQUESTED_TESTCACHE=""
 WORKER_COUNT_VALUE=""
 TESTCACHE_VALUE=""
+MEMORY_LIMIT_VALUE=""
 declare -a AFL_ARGS=()
 declare -a AFL_SECONDARY_PIDS=()
 
@@ -121,6 +125,15 @@ parse_args() {
           exit 1
         fi
         REQUESTED_WORKERS="$2"
+        shift 2
+        ;;
+      --memory)
+        if [[ $# -lt 2 ]]; then
+          echo "--memory requires a value in megabytes or 'none'" >&2
+          usage >&2
+          exit 1
+        fi
+        REQUESTED_MEMORY="$2"
         shift 2
         ;;
       --testcache)
@@ -300,11 +313,22 @@ run_afl() {
     printf 'seed' >"${default_seed}"
   fi
 
-  local -a harness_tail=( "--" "${dotnet_path}" "${ASSEMBLY_PATH}" "@@" )
+  local -a harness_tail=( "--" "${dotnet_path}" "${ASSEMBLY_PATH}" )
 
   if [[ ${#AFL_ARGS[@]} -gt 0 ]]; then
     echo "Launching AFL++ with custom arguments: ${AFL_ARGS[*]}"
-    local -a afl_cmd=( "afl-fuzz" "${AFL_ARGS[@]}" "${harness_tail[@]}" )
+    local -a afl_cmd=( "afl-fuzz" )
+
+    if [[ -n "${MEMORY_LIMIT_VALUE}" ]]; then
+      if [[ "${MEMORY_LIMIT_VALUE}" == "none" ]]; then
+        echo "Disabling AFL++ memory limit (-m none)."
+      else
+        echo "Setting AFL++ memory limit to ${MEMORY_LIMIT_VALUE} MB."
+      fi
+      afl_cmd+=( "-m" "none" )
+    fi
+
+    afl_cmd+=( "${AFL_ARGS[@]}" "${harness_tail[@]}" )
     exec "${afl_cmd[@]}"
   fi
 
@@ -347,6 +371,15 @@ run_afl() {
   fi
 
   local -a base_cmd=( "afl-fuzz" "-i" "${corpus_dir}" "-o" "${findings_dir}" )
+
+  if [[ -n "${MEMORY_LIMIT_VALUE}" ]]; then
+    if [[ "${MEMORY_LIMIT_VALUE}" == "none" ]]; then
+      echo "Disabling AFL++ memory limit (-m none)."
+    else
+      echo "Setting AFL++ memory limit to ${MEMORY_LIMIT_VALUE} MB."
+    fi
+    base_cmd+=( "-m" "${MEMORY_LIMIT_VALUE}" )
+  fi
 
   if (( worker_count == 1 )); then
     echo "Launching AFL++ with seed corpus at ${corpus_dir}."
@@ -481,6 +514,12 @@ main() {
       usage >&2
       exit 1
     fi
+
+    if [[ -n "${REQUESTED_MEMORY}" ]]; then
+      echo "--memory is only available with the 'afl' command." >&2
+      usage >&2
+      exit 1
+    fi
   fi
 
   if [[ -n "${REQUESTED_WORKERS}" ]]; then
@@ -504,6 +543,21 @@ main() {
     fi
 
     TESTCACHE_VALUE=$((10#${REQUESTED_TESTCACHE}))
+  fi
+
+  if [[ -n "${REQUESTED_MEMORY}" ]]; then
+    if [[ "${REQUESTED_MEMORY}" == "none" ]]; then
+      MEMORY_LIMIT_VALUE="none"
+    elif [[ "${REQUESTED_MEMORY}" =~ ^[0-9]+$ ]]; then
+      MEMORY_LIMIT_VALUE=$((10#${REQUESTED_MEMORY}))
+      if (( MEMORY_LIMIT_VALUE < 0 )); then
+        echo "--memory requires a non-negative integer or 'none'." >&2
+        exit 1
+      fi
+    else
+      echo "--memory requires a non-negative integer or 'none'." >&2
+      exit 1
+    fi
   fi
 
   if (( FORCE_SINGLE )); then
