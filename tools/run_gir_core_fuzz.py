@@ -636,6 +636,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Override the AFL++ memory limit in megabytes or use 'none' to disable",
     )
     afl_parser.add_argument(
+        "--timeout",
+        type=positive_int,
+        help="Override the AFL++ execution timeout in milliseconds",
+    )
+    afl_parser.add_argument(
         "--testcache",
         type=non_negative_int,
         help="Set AFL_TESTCACHE_SIZE in megabytes (defaults to 200 when unset)",
@@ -790,6 +795,9 @@ def run_afl(args: argparse.Namespace) -> None:
     worker_count = max(1, worker_count)
 
     base_cmd = ["afl-fuzz", "-i", str(corpus_dir), "-o", str(findings_dir)]
+    if args.timeout is not None:
+        print(f"Setting AFL++ execution timeout to {args.timeout} ms.")
+        base_cmd.extend(["-t", str(args.timeout)])
     if memory_limit is not None:
         if memory_limit == "none":
             print("Disabling AFL++ memory limit (-m none).")

@@ -2,6 +2,8 @@ using System;
 using System.Buffers;
 using System.IO;
 using System.Reflection;
+using System.Runtime.InteropServices;
+using System.Threading;
 using GLib.Internal;
 using ManagedSourceFunc = GLib.SourceFunc;
 
@@ -9,16 +11,47 @@ namespace GirCore.Fuzzing;
 
 public static class SourceFuncFuzzer
 {
-    private const int MaxInputLength = 4096;
+    internal const int MaxInputLength = 4096;
     private const int MaxOperationCount = 32;
     private static readonly ManagedSourceFunc DefaultCallback = () => false;
     private static readonly System.Collections.Generic.Dictionary<int, int> CoverageSlots = new();
     private static readonly object CoverageLock = new();
     private static int NextCoverageSlot;
+    private static readonly byte[] DrainBuffer = new byte[1024];
+    private static readonly bool TraceIterations =
+        string.Equals(
+            Environment.GetEnvironmentVariable("SOURCEFUNC_FUZZ_TRACE_ITER"),
+            "1",
+            StringComparison.Ordinal);
+
+    private static readonly string TraceIterationPath =
+        Path.Combine(AppContext.BaseDirectory, "SourceFuncFuzzer-iter.log");
+
+    private static long IterationCounter;
+    private static readonly Action<SourceFuncForeverHandler>? ForeverHandleReleaser = CreateForeverHandleReleaser();
+    private static long ForeverHandlesAllocated;
+    private static long ForeverHandlesReleased;
 
     public static void Run(Stream stream)
     {
         ArgumentNullException.ThrowIfNull(stream);
+
+        var iteration = Interlocked.Increment(ref IterationCounter);
+
+        if (TraceIterations && iteration % 1000 == 0)
+        {
+            try
+            {
+                var managedBytes = GC.GetTotalMemory(false);
+                File.AppendAllText(
+                    TraceIterationPath,
+                    $"iteration={iteration} handles={{allocated:{Interlocked.Read(ref ForeverHandlesAllocated)},released:{Interlocked.Read(ref ForeverHandlesReleased)}}} managed_bytes={managedBytes} coverage_slots={GetCoverageCount()}{Environment.NewLine}");
+            }
+            catch
+            {
+                // Diagnostics only; ignore logging failures.
+            }
+        }
 
         var buffer = ArrayPool<byte>.Shared.Rent(MaxInputLength);
 
@@ -44,9 +77,18 @@ public static class SourceFuncFuzzer
     {
         var total = 0;
 
-        while (total < buffer.Length)
+        while (true)
         {
-            var read = stream.Read(buffer, total, buffer.Length - total);
+            int read;
+
+            if (total < buffer.Length)
+            {
+                read = stream.Read(buffer, total, buffer.Length - total);
+            }
+            else
+            {
+                read = stream.Read(DrainBuffer, 0, DrainBuffer.Length);
+            }
 
             if (read <= 0)
             {
@@ -56,7 +98,7 @@ public static class SourceFuncFuzzer
             total += read;
         }
 
-        return total;
+        return Math.Min(total, buffer.Length);
     }
 
     private static void Execute(ReadOnlySpan<byte> data)
@@ -212,6 +254,14 @@ public static class SourceFuncFuzzer
         }
     }
 
+    private static int GetCoverageCount()
+    {
+        lock (CoverageLock)
+        {
+            return CoverageSlots.Count;
+        }
+    }
+
     private static class TraceAccessor
     {
         private static readonly System.Reflection.FieldInfo? SharedMemField;
@@ -266,6 +316,8 @@ public static class SourceFuncFuzzer
         {
             InvokeDelegate(handler.DestroyNotify, ref reader, ref defaults, userData, 1, ref exhausted);
         }
+
+        handler.DestroyNotify?.Invoke(userData);
     }
 
     private static void RunAsync(ManagedSourceFunc managed, int invocationCount, IntPtr userData, ref FuzzDataReader reader, ref ScenarioDefaults defaults, ref bool exhausted)
@@ -282,8 +334,10 @@ public static class SourceFuncFuzzer
 
     private static void RunForever(ManagedSourceFunc managed, int invocationCount, IntPtr userData, ref FuzzDataReader reader, ref ScenarioDefaults defaults, ref bool exhausted)
     {
+        Interlocked.Increment(ref ForeverHandlesAllocated);
         var handler = new SourceFuncForeverHandler(managed);
         InvokeDelegate(handler.NativeCallback, ref reader, ref defaults, userData, invocationCount, ref exhausted);
+        ReleaseForeverHandle(handler);
     }
 
     private static void InvokeDelegate(Delegate? callback, ref FuzzDataReader reader, ref ScenarioDefaults defaults, IntPtr userData, int invocationCount, ref bool exhausted)
@@ -307,6 +361,49 @@ public static class SourceFuncFuzzer
             {
                 throw ex.InnerException;
             }
+        }
+    }
+
+    private static void ReleaseForeverHandle(SourceFuncForeverHandler handler)
+    {
+        ForeverHandleReleaser?.Invoke(handler);
+        Interlocked.Increment(ref ForeverHandlesReleased);
+    }
+
+    private static Action<SourceFuncForeverHandler>? CreateForeverHandleReleaser()
+    {
+        try
+        {
+            var field = typeof(SourceFuncForeverHandler).GetField(
+                "gch",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+
+            if (field is null || field.FieldType != typeof(GCHandle))
+            {
+                return null;
+            }
+
+            return handler =>
+            {
+                try
+                {
+                    var handle = (GCHandle)field.GetValue(handler)!;
+
+                    if (handle.IsAllocated)
+                    {
+                        handle.Free();
+                        field.SetValue(handler, default(GCHandle));
+                    }
+                }
+                catch
+                {
+                    // Ignore failures; fuzzing should keep running even if the handle cannot be released.
+                }
+            };
+        }
+        catch
+        {
+            return null;
         }
     }
 
@@ -477,22 +574,29 @@ public static class SourceFuncFuzzer
 
         var length = 1 + (lengthByte & 0x07);
         TraceEdge(0x6000 | length);
-        var pattern = new bool[length];
+        var patternBits = 0;
 
-        for (var i = 0; i < pattern.Length; i++)
+        for (var i = 0; i < length; i++)
         {
-            if (reader.TryReadBool(out var value))
+            bool value;
+
+            if (reader.TryReadBool(out var readValue))
             {
-                pattern[i] = value;
+                value = readValue;
             }
             else
             {
-                pattern[i] = defaults.NextBool();
+                value = defaults.NextBool();
                 exhausted = true;
             }
 
+            if (value)
+            {
+                patternBits |= 1 << i;
+            }
+
             var bitId = (i & 0x1F) << 1;
-            TraceEdge(0x6100 | bitId | (pattern[i] ? 0x1 : 0x0));
+            TraceEdge(0x6100 | bitId | (value ? 0x1 : 0x0));
         }
 
         byte mode;
@@ -509,7 +613,7 @@ public static class SourceFuncFuzzer
 
         TraceEdge(0x6200 | (mode & 0x3F));
 
-        var callback = new CallbackPlan(pattern, mode);
+        var callback = new CallbackPlan(patternBits, length, mode);
         return callback.Invoke;
     }
 
@@ -572,20 +676,23 @@ public static class SourceFuncFuzzer
 
     private sealed class CallbackPlan
     {
-        private readonly bool[] pattern;
+        private int patternBits;
+        private readonly int length;
         private readonly byte mode;
         private int index;
 
-        public CallbackPlan(bool[] pattern, byte mode)
+        public CallbackPlan(int patternBits, int length, byte mode)
         {
-            this.pattern = pattern.Length == 0 ? new[] { false } : pattern;
+            this.patternBits = patternBits;
+            this.length = Math.Max(length, 1);
             this.mode = mode;
         }
 
         public bool Invoke()
         {
-            var slot = index % pattern.Length;
-            var result = pattern[slot];
+            var slot = index % length;
+            var slotMask = 1 << slot;
+            var result = (patternBits & slotMask) != 0;
             TraceEdge(0x6300 | (slot & 0x1F));
 
             if ((mode & 0x1) != 0)
@@ -596,7 +703,7 @@ public static class SourceFuncFuzzer
 
             if ((mode & 0x2) != 0)
             {
-                pattern[slot] = !pattern[slot];
+                patternBits ^= slotMask;
                 TraceEdge(0x6401);
             }
 
