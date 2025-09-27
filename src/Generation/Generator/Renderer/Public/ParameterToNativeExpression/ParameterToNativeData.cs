@@ -8,6 +8,7 @@ public class ParameterToNativeData(GirModel.Parameter parameter)
     private Func<string>? _getSignatureName;
     private Func<string>? _getExpression;
     private Func<string>? _getPostCallExpression;
+    private string? _resultVariableName;
 
     private string? _callName;
     private string? _signatureName;
@@ -35,6 +36,13 @@ public class ParameterToNativeData(GirModel.Parameter parameter)
     }
 
     public string? GetPostCallExpression() => _postCallExpression ??= _getPostCallExpression?.Invoke();
+
+    public void SetResultVariableName(string? name)
+    {
+        _resultVariableName = name;
+    }
+
+    public string? GetResultVariableName() => _resultVariableName;
 
     public void SetCallName(Func<string> getCallName)
     {
