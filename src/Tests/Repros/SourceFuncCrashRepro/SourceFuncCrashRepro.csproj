@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TargetFramework>net9.0</TargetFramework>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../../Libs/GLib-2.0/GLib-2.0.csproj" />
+    <ProjectReference Include="../../../Libs/GObject-2.0/GObject-2.0.csproj" />
+  </ItemGroup>
+</Project>
