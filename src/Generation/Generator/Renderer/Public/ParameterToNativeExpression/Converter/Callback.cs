@@ -55,11 +55,57 @@ internal class Callback : ToNativeParameterConverter
         if (destroyParameter.Parameter.AnyTypeOrVarArgs.AsT0.AsT0 is not GirModel.Callback { Name: "DestroyNotify" })
             throw new Exception("Destroyparameter is not of type DestroyNotify");
 
+        var destroyWrapperVariable = handlerNameVariable + "Destroy";
+        var destroyHandleVariable = handlerNameVariable + "DestroyHandle";
+
         destroyParameter.IsDestroyNotify = true;
         destroyParameter.SetSignatureName(() => "destroy");
-        destroyParameter.SetCallName(() => handlerNameVariable + ".DestroyNotify");
+        destroyParameter.SetCallName(() => destroyWrapperVariable);
 
         parameter.SetExpression(() => $"var {handlerNameVariable} = new {Namespace.GetInternalName(callback.Namespace)}.{Model.Callback.GetNotifiedHandlerName(callback)}({parameterName});");
+
+        destroyParameter.SetExpression(() => @$"    GLib.Internal.DestroyNotify? {destroyWrapperVariable} = null;
+    System.Runtime.InteropServices.GCHandle {destroyHandleVariable} = default;
+    if ({handlerNameVariable}.NativeCallback is null)
+    {{
+        {destroyWrapperVariable} = {handlerNameVariable}.DestroyNotify;
+    }}
+    else if ({handlerNameVariable}.DestroyNotify is not null)
+    {{
+        {destroyWrapperVariable} = data =>
+        {{
+            try
+            {{
+                {handlerNameVariable}.DestroyNotify!(data);
+            }}
+            finally
+            {{
+                if ({destroyHandleVariable}.IsAllocated)
+                    {destroyHandleVariable}.Free();
+            }}
+        }};
+    }}
+");
+
+        destroyParameter.SetPostCallExpression(() =>
+        {
+            var resultVariable = destroyParameter.GetResultVariableName();
+            var successCondition = resultVariable is null ? "true" : $"System.Convert.ToInt64({resultVariable}) != 0";
+
+            return @$"    if ({handlerNameVariable}.NativeCallback is not null && {destroyWrapperVariable} is not null)
+    {{
+        if ({successCondition})
+        {{
+            if (!{destroyHandleVariable}.IsAllocated)
+                {destroyHandleVariable} = System.Runtime.InteropServices.GCHandle.Alloc({destroyWrapperVariable});
+        }}
+        else if ({destroyHandleVariable}.IsAllocated)
+        {{
+            {destroyHandleVariable}.Free();
+        }}
+    }}
+";
+        });
     }
 
     private static void FillCallScope(ParameterToNativeData parameter, IEnumerable<ParameterToNativeData> parameters)

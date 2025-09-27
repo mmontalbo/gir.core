@@ -111,6 +111,15 @@ public static {newModifier}{ReturnTypeRenderer.Render(function.ReturnType)} {Fun
 
         call.Append(Error.RenderThrowOnError(function));
 
+        var resultVariableForParameters = function.ReturnType.AnyType.Is<GirModel.Void>()
+            ? null
+            : resultVariableName;
+
+        foreach (var parameter in parameters)
+        {
+            parameter.SetResultVariableName(resultVariableForParameters);
+        }
+
         return call.ToString();
     }
 

@@ -15,8 +15,7 @@ public class SourceFuncCrashTests : Test
     private static readonly string ReproProject = Path.Combine(RepoRoot, "src", "Tests", "Repros", "SourceFuncCrashRepro", "SourceFuncCrashRepro.csproj");
 
     [TestMethod]
-    [Ignore("Repro currently crashes; enable once SourceFunc destroy-notify lifetime is fixed")] 
-    public void SourceFuncDestroyNotifyWrapperIsCollected()
+    public void SourceFuncDestroyNotifyWrapperIsKeptAlive()
     {
         if (!RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
         {
@@ -29,7 +28,7 @@ public class SourceFuncCrashTests : Test
         var startInfo = new ProcessStartInfo
         {
             FileName = "dotnet",
-            ArgumentList = { "run", "--no-build", "--project", ReproProject },
+            ArgumentList = { "run", "--project", ReproProject },
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
@@ -47,8 +46,8 @@ public class SourceFuncCrashTests : Test
         Console.WriteLine(output);
         Console.Error.WriteLine(error);
 
-        process.ExitCode.Should().NotBe(0, "current bindings abort with SIGABRT");
-        error.Should().Contain("callback was made on a garbage collected delegate");
+        process.ExitCode.Should().Be(0, "the destroy-notify wrapper is now rooted");
+        error.Should().NotContain("garbage collected delegate");
     }
 
     private static string GetRepoRoot()

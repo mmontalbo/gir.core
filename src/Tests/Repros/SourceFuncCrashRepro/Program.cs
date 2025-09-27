@@ -39,30 +39,19 @@ internal static class Program
 
     private static void ScheduleAndCollect()
     {
-        var handler = new GLib.Internal.SourceFuncNotifiedHandler(() =>
+        GLib.SourceFunc? callback = () =>
         {
             Console.Error.WriteLine("[repro] callback invoked");
             return false;
-        });
-
-        GLib.Internal.DestroyNotify destroyWrapper = data =>
-        {
-            Console.Error.WriteLine("[repro] destroy-notify invoked");
-            handler.DestroyNotify?.Invoke(data);
         };
 
-        var sourceId = GLib.Internal.Functions.IdleAdd(
-            GLib.Constants.PRIORITY_DEFAULT_IDLE,
-            handler.NativeCallback,
-            IntPtr.Zero,
-            destroyWrapper);
+        var sourceId = GLib.Functions.IdleAdd(GLib.Constants.PRIORITY_DEFAULT_IDLE, callback);
 
         Console.Error.WriteLine($"[repro] scheduled source id={sourceId}");
 
-        // Drop the managed references. Without additional rooting, the wrapper can be collected
+        // Drop the managed reference. Without additional rooting, the native callback can be collected
         // before GLib invokes it, reproducing the crash we observed in real apps.
-        handler = null!;
-        destroyWrapper = null!;
+        callback = null;
     }
 
     private static void ForceGc()
