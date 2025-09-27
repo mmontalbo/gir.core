@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using SharpFuzz;
 
 namespace GirCore.Fuzzing;
@@ -6,6 +7,9 @@ public static class Program
 {
     public static void Main(string[] args)
     {
+        GLib.Module.Initialize();
+        GObject.Module.Initialize();
+
         var disablePersistent =
             string.Equals(
                 Environment.GetEnvironmentVariable("SOURCEFUNC_FUZZ_DISABLE_PERSISTENT"),
@@ -24,6 +28,31 @@ public static class Program
         catch
         {
             // Ignore environment logging failures, this is diagnostic only.
+        }
+
+        var validateDirectory = Environment.GetEnvironmentVariable("SOURCEFUNC_FUZZ_VALIDATE_DIR");
+
+        if (!string.IsNullOrEmpty(validateDirectory))
+        {
+            var seedsRaw = Environment.GetEnvironmentVariable("SOURCEFUNC_FUZZ_VALIDATE_SEEDS");
+            var runsRaw = Environment.GetEnvironmentVariable("SOURCEFUNC_FUZZ_VALIDATE_RUNS");
+            var runs = 5;
+
+            if (!string.IsNullOrEmpty(runsRaw) && int.TryParse(runsRaw, out var parsedRuns) && parsedRuns > 1)
+            {
+                runs = parsedRuns;
+            }
+
+            var seeds = new List<string>();
+
+            if (!string.IsNullOrEmpty(seedsRaw))
+            {
+                var split = seedsRaw.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+                seeds.AddRange(split);
+            }
+
+            ReplayHarness.ValidateDeterministic(validateDirectory, seeds, runs);
+            return;
         }
 
         var replayDirectory = Environment.GetEnvironmentVariable("SOURCEFUNC_FUZZ_REPLAY_DIR");

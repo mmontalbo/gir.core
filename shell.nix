@@ -9,6 +9,8 @@ pkgs.mkShell {
     dotnetSdk
     cacert
     pkgs.aflplusplus
+    pkgs.lldb
+    pkgs.glib
   ];
 
   DOTNET_ROOT = "${dotnetSdk}/share/dotnet";
@@ -21,6 +23,7 @@ pkgs.mkShell {
     export DOTNET_CLI_HOME="''${DOTNET_CLI_HOME:-$repo_root/.dotnet}"
     export PATH="$DOTNET_CLI_HOME/tools:$PATH"
     export AFL_SKIP_CPUFREQ="''${AFL_SKIP_CPUFREQ:-1}"
+    export LD_LIBRARY_PATH="${pkgs.glib.out}/lib:''${LD_LIBRARY_PATH:-}"
 
     props_file="$repo_root/properties/GirCore.Fuzzing.props"
 
