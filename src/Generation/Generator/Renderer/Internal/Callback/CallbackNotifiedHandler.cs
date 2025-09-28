@@ -23,6 +23,7 @@ public class {handlerName}
     public GLib.Internal.DestroyNotify? DestroyNotify;
 
     private {Namespace.GetPublicName(callback.Namespace)}.{callbackName}? managedCallback;
+    private GCHandle gch;
 
     public {handlerName}({Namespace.GetPublicName(callback.Namespace)}.{callbackName}? managed)
     {{
@@ -36,12 +37,15 @@ public class {handlerName}
         }}
         else
         {{
+            gch = GCHandle.Alloc(this);
+
             {CallbackCommonHandlerRenderUtils.RenderNativeCallback(callback, GirModel.Scope.Notified)}
         }}
     }}
 
     private void DestroyCallback(IntPtr userData)
     {{
+        gch.Free();
     }}
 }}";
     }
