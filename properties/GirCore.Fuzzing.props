@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project>
+  <PropertyGroup>
+    <SharpFuzzVersion>2.2.0</SharpFuzzVersion>
+  </PropertyGroup>
+</Project>

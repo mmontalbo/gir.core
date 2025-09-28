@@ -45,7 +45,13 @@ public class {handlerName}
 
     private void DestroyCallback(IntPtr userData)
     {{
+        if (!gch.IsAllocated)
+        {{
+            return;
+        }}
+
         gch.Free();
+        gch = default;
     }}
 }}";
     }
